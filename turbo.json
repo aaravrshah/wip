@@ -1,0 +1,42 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "tasks": {
+    "dev": {
+      "cache": false,
+      "persistent": true
+    },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": [".next/**", "!.next/cache/**", "dist/**"]
+    },
+    "@wip/domain#build": {
+      "outputs": []
+    },
+    "@wip/database#build": {
+      "outputs": []
+    },
+    "@wip/fixtures#build": {
+      "outputs": []
+    },
+    "format:check": {
+      "outputs": []
+    },
+    "lint": {
+      "dependsOn": ["^lint"],
+      "outputs": []
+    },
+    "typecheck": {
+      "dependsOn": ["^typecheck"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["^test"],
+      "outputs": []
+    },
+    "test:integration": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "outputs": []
+    }
+  }
+}

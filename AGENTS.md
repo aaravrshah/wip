@@ -1,10 +1,10 @@
-# WIP repository guidance
+# Wip repository guidance
 
 This file applies to the entire repository. More-specific `AGENTS.md` files may add constraints for a subtree, but they may not weaken the privacy, confirmation, permission, or quality requirements below.
 
 ## Product context
 
-WIP is a user-controlled job-application tracker. The responsive web app is the system of record. The Chrome extension is a capture client, not a second database. Later email ingestion may propose timeline events, and later aggregate analytics may use only explicitly consented, de-identified contributions.
+Wip is a user-controlled job-application tracker. The responsive web app is the system of record. The Chrome extension is a capture client, not a second database. Later email ingestion may propose timeline events, and later aggregate analytics may use only explicitly consented, de-identified contributions.
 
 Read the relevant files in `docs/` before changing product behavior or architecture. Keep scope aligned with the current milestone; do not implement later-milestone infrastructure speculatively.
 

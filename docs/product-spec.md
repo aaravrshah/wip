@@ -1,8 +1,8 @@
-# WIP product specification
+# Wip product specification
 
 Status: Milestone 0 baseline  
 Last updated: 2026-08-04  
-Working name: WIP / wip (not a confirmed public name)
+Working name: Wip (not a legally cleared final name)
 
 ## 1. Product definition
 
@@ -10,7 +10,7 @@ Working name: WIP / wip (not a confirmed public name)
 
 The initial user is a recent graduate or early-career applicant managing enough concurrent applications that spreadsheets, inbox search, and memory are no longer reliable. They often reuse and revise resumes and cover letters, apply across many employer systems, and need to know what happened, when it happened, and what to do next.
 
-The underlying model must also work for experienced applicants, career changers, contractors, and people running a smaller but longer hiring process. WIP should not encode assumptions that all users are students, all roles are full-time, or all hiring processes follow the same stages.
+The underlying model must also work for experienced applicants, career changers, contractors, and people running a smaller but longer hiring process. Wip should not encode assumptions that all users are students, all roles are full-time, or all hiring processes follow the same stages.
 
 ### Problem
 
@@ -24,11 +24,11 @@ Application evidence is scattered across expiring job posts, applicant-tracking 
 
 ### Product promise
 
-WIP gives an applicant a trustworthy, chronological record of each hiring process and turns that record into clear next actions. It preserves the job description the user actually saw, remembers the documents used, and keeps the user—not an extraction model—in control of consequential status changes.
+Wip gives an applicant a trustworthy, chronological record of each hiring process and turns that record into clear next actions. It preserves the job description the user actually saw, remembers the documents used, and keeps the user—not an extraction model—in control of consequential status changes.
 
 ### Differentiator
 
-WIP is an evidence-backed application history rather than a status spreadsheet or an auto-apply engine. The differentiating combination is:
+Wip is an evidence-backed application history rather than a status spreadsheet or an auto-apply engine. The differentiating combination is:
 
 1. an immutable job-description snapshot with capture provenance;
 2. an event-first timeline rather than an overwritten status field;
@@ -55,15 +55,15 @@ An application is the user's record for one role at one employer. It can begin b
 
 A snapshot is an immutable preservation of the job-description content at a moment in time. For the MVP, “exact” means the captured job-description content and meaningful formatting are preserved as sanitized HTML plus plain text, together with source URL, capture time, page metadata, extraction version, and a content hash. Scripts, trackers, hidden page state, and unrelated navigation are excluded.
 
-This is a faithful semantic snapshot, not a pixel-perfect screenshot, WARC archive, or promise to reproduce the entire source page. Each recapture creates a new snapshot; an existing snapshot is never overwritten. The user previews extension captures before saving. Milestone 1 supports a manual pasted snapshot; Milestone 2 adds current-page capture.
+This is a faithful semantic snapshot, not a pixel-perfect screenshot, WARC archive, or promise to reproduce the entire source page. Screenshots and full-page archives are postponed. Each recapture creates a new snapshot; an existing snapshot is never overwritten. The user previews extension captures before saving. Milestone 1 supports a manual pasted snapshot; Milestone 2 adds current-page capture.
 
 ### Event and current stage
 
 An event records something that happened, with an occurrence time and source. The default user-facing stages are:
 
-`saved` → `preparing` → `applied` → `interviewing` → `offer`
+`saved` → `preparing` → `applied` → `assessment` → `interviewing` → `offer`
 
-Terminal outcomes are `accepted`, `rejected`, and `withdrawn`. Archival is independent of stage. The projection may move backward after a correction, and not every application visits every stage. “No response” or “ghosted” is a derived signal, not a manually selected stage.
+Terminal outcomes are `accepted`, `rejected`, and `withdrawn`. `assessment` includes online assessments, HireVues, coding tests, and take-home assignments; an application may skip it or return to it. Archival is independent of stage. The projection may move backward after a correction, and not every application visits every stage. Ghosting is a derived analytical outcome, not a manually selected stage. User-facing operational screens should use neutral language such as “awaiting response” until a future analytical definition is approved.
 
 Only confirmed events participate in the current-stage projection. Manual events are confirmed at creation. Automated status-changing events remain pending until the user approves them.
 
@@ -77,11 +77,13 @@ A next action is a concrete task such as “follow up with Maya” or “prepare
 
 Today is the default signed-in screen and answers “What should I deal with now?” It contains, in this order:
 
-1. **Needs your review:** pending automated event proposals, each showing application, proposed change, source, confidence, and confirm/reject actions. This section is absent until Milestone 3 but its placement is reserved.
-2. **Overdue and due today:** incomplete next actions ordered by due time, then application last activity.
-3. **Coming up:** incomplete actions due in the next seven days.
-4. **Needs attention:** applied or active applications with no next action, plus potentially stale applications based on a configurable heuristic. WIP must label this as a reminder heuristic, not “ghosted.”
-5. **Recent activity:** the latest confirmed events across applications.
+1. **Upcoming:** scheduled interviews and assessments ordered by occurrence time.
+2. **Overdue follow-ups:** incomplete follow-up actions whose due time has passed.
+3. **Awaiting responses:** submitted applications with no qualifying employer response yet, described neutrally rather than labeled ghosting.
+4. **Recently changed:** the latest confirmed application changes.
+5. **Stage summary:** a compact count across the current application stages.
+
+Later, **Needs your review** appears ahead of these sections for pending automated event proposals, each showing application, proposed change, source, confidence, and confirm/reject actions. This section is absent until Milestone 3.
 
 The screen includes quick actions for adding an application and adding a next action. Completing an action updates it in place and appends an auditable event. Empty states explain the next useful action and can load local development demo data only in a demo/development environment.
 
@@ -91,6 +93,7 @@ The table is the high-density canonical index. Default columns are:
 
 - company;
 - role;
+- location;
 - current stage or outcome;
 - applied date, if any;
 - next action and due time;
@@ -103,15 +106,15 @@ On narrow screens, each row becomes a compact card with company, role, stage, an
 
 ### Optional Kanban view
 
-Kanban is a second view over the same application query, never a separate source of truth. Columns correspond to the default stages and terminal outcomes. Archived applications are hidden by default; terminal columns may be collapsed.
+Kanban is postponed until the end of Milestone 1. When implemented, it is a second view over the same application query, never a separate source of truth. Columns correspond to the default stages and terminal outcomes. Archived applications are hidden by default; terminal columns may be collapsed.
 
-Dragging a card creates a confirmed manual status event and immediately updates the projection. Before saving an unusual backward or terminal transition, WIP asks for confirmation. Every drag operation has keyboard and menu equivalents, and users can always switch back to the table. The table is the default because it scales better and exposes dates and next actions.
+Dragging a card creates a confirmed manual status event and immediately updates the projection. Before saving an unusual backward or terminal transition, Wip asks for confirmation. Every drag operation has keyboard and menu equivalents, and users can always switch back to the table. The table is the default because it scales better and exposes dates and next actions.
 
 ### Application-detail screen
 
 The detail screen combines facts, evidence, and actions for one application:
 
-- **Header:** company, role, current stage/outcome, location, source URL, archive control, and primary action.
+- **Header:** company, role, current stage/outcome, location, source URL, requisition ID, archive control, and primary action.
 - **Next action:** earliest incomplete action plus controls to add, reschedule, complete, or cancel actions.
 - **Timeline:** reverse-chronological by default, with an option for oldest-first. Each event shows what happened, occurrence time, source, confirmation state, and confidence when applicable. Pending automated proposals are visually distinct and do not alter current stage.
 - **Job description:** the active immutable snapshot with capture time, original URL, content hash indicator, and snapshot-version selector. The original source can be opened separately.
@@ -124,15 +127,15 @@ On mobile, these sections appear as a single readable column with timeline, next
 
 ## 4. MVP scope
 
-For planning purposes, the launch MVP spans Milestones 1 and 2: a manually useful web tracker plus intentional current-tab capture. Milestone 1 must be independently useful without the extension.
+For planning purposes, the launch MVP spans Milestones 1 and 2: a manually useful web tracker plus intentional current-tab capture. Milestone 1 must be independently useful without the extension. Milestone 1A is a front-end-only vertical prototype using fictional seed data. Milestone 1B-1 introduces the read-only Neon PostgreSQL persistence foundation; Milestone 1B-2 adds separately selected authentication, user mutations, RLS, and production API integration.
 
 ### Included in the MVP
 
-- Account sign-in and strict per-user data isolation.
+- Account sign-in and strict per-user data isolation in Milestone 1B-2. Clerk is the leading provider candidate, but launch sign-in methods remain unresolved until that slice.
 - Manual application create, edit, archive, and delete.
 - Manual immutable job-description snapshots, followed by extension capture in Milestone 2.
 - Manual chronological events and derived current stage.
-- Today, applications table, Kanban, and application detail.
+- Today, applications table, and application detail in Milestone 1A; Kanban at the end of Milestone 1.
 - Document-version metadata and explicit application/document associations; file upload is not required.
 - Contacts, notes, and next actions.
 - In-app due and overdue reminders; external push/email reminders are later.
@@ -153,7 +156,7 @@ For planning purposes, the launch MVP spans Milestones 1 and 2: a manually usefu
 
 ## 5. Explicit non-goals
 
-WIP will not provide the following in the scoped roadmap:
+Wip will not provide the following in the scoped roadmap:
 
 - auto-apply;
 - mass application submission;
@@ -170,7 +173,7 @@ WIP will not provide the following in the scoped roadmap:
 - Application creation requires company and role; all other fields may be added later.
 - Applying is recorded as an event. `applied_at` shown in lists is a projection of the confirmed submission event, not an independently editable truth.
 - Manual event occurrence time may be backdated. Creation time is always system-generated and retained separately.
-- Correcting history creates a correction/superseding record. WIP must not hide that the correction occurred.
+- Correcting history creates a correction/superseding record. Wip must not hide that the correction occurred.
 - One document version may be used by many applications. Replacing a document file or label creates a new version; it does not rewrite past uses.
 - A pending or rejected automated proposal cannot change Today counts, current stage, or aggregate contribution.
 - The extension runs only after a user gesture, shows a capture preview, and transmits only the reviewed job content and required metadata.
@@ -191,12 +194,8 @@ Aggregate hiring outcomes are not an MVP success metric because aggregate contri
 
 ## 8. Open product dependencies
 
-The following must be confirmed before or during Milestone 1; recommended defaults are recorded in `docs/decisions.md`:
+The following remain open before later Milestone 1 or beta work; confirmed Milestone 1A decisions are recorded in `docs/decisions.md`:
 
 - public name and domain;
-- initial sign-in methods;
-- approval of the semantic snapshot definition;
-- approval of the default stage vocabulary;
-- whether Kanban is required for the first internal demo or may land at the end of Milestone 1;
 - reminder defaults and timezone behavior; and
-- whether document files remain metadata-only through the initial beta.
+- detailed Kanban terminal-column behavior for the end-of-Milestone-1 slice.

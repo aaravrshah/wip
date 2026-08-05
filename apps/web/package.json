@@ -1,0 +1,39 @@
+{
+  "name": "@wip/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run --exclude '**/*.integration.test.ts'",
+    "test:integration": "vitest run src/data/neon-application-repository.integration.test.ts"
+  },
+  "dependencies": {
+    "@wip/database": "workspace:*",
+    "@wip/domain": "workspace:*",
+    "@wip/fixtures": "workspace:*",
+    "drizzle-orm": "^0.45.2",
+    "lucide-react": "^1.28.0",
+    "next": "^16.3.0",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "server-only": "^0.0.1",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^7.0.0",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.3",
+    "@types/node": "^26.1.2",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.0",
+    "jsdom": "^30.0.1",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.10"
+  }
+}

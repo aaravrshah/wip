@@ -1,0 +1,26 @@
+{
+  "name": "wip",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.9.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "turbo dev --filter=@wip/web",
+    "build": "turbo build",
+    "db:generate": "pnpm --filter @wip/database db:generate",
+    "db:migrate": "pnpm --filter @wip/database db:migrate",
+    "db:seed": "pnpm --filter @wip/database db:seed",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "lint": "turbo lint",
+    "typecheck": "turbo typecheck",
+    "test": "turbo test",
+    "test:integration": "turbo test:integration"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.6",
+    "turbo": "^2.10.8"
+  }
+}

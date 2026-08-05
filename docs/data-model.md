@@ -1,6 +1,6 @@
-# WIP event-first data model
+# Wip event-first data model
 
-Status: proposed Milestone 0 model  
+Status: implemented foundation plus later-model requirements
 Last updated: 2026-08-04  
 Database assumption: PostgreSQL
 
@@ -10,7 +10,7 @@ The model must answer both “what is the current state?” and “what happened
 
 Core invariants:
 
-1. Every user-owned row has an explicit `user_id` ownership path and is protected by row-level security.
+1. Every user-owned row has an explicit non-null `owner_id` ownership path. Same-owner composite foreign keys and owner-scoped repository predicates are required in Milestone 1B-1; authenticated RLS enforcement is added in Milestone 1B-2 before real-user data.
 2. Job-description snapshots are immutable. A recapture inserts a new row.
 3. Application-event facts are append-oriented. Corrections supersede earlier events rather than editing their occurrence details.
 4. Event occurrence time and record creation time are different fields.
@@ -25,7 +25,7 @@ Use UUID primary keys, database-generated `created_at`, foreign keys, check cons
 
 ```mermaid
 erDiagram
-    PROFILE ||--o{ APPLICATION : owns
+    OWNER ||--o{ APPLICATION : owns
     APPLICATION ||--o{ JOB_DESCRIPTION_SNAPSHOT : preserves
     APPLICATION ||--o{ APPLICATION_EVENT : records
     APPLICATION_EVENT ||--o{ EVENT_CONFIRMATION_DECISION : reviewed_by
@@ -36,20 +36,22 @@ erDiagram
     CONTACT ||--o{ APPLICATION_CONTACT : linked_to
     APPLICATION ||--o{ NOTE : has
     APPLICATION ||--o{ NEXT_ACTION : has
-    PROFILE ||--o{ AGGREGATION_CONSENT : decides
+    OWNER ||--o{ AGGREGATION_CONSENT : decides
 ```
 
-The authentication provider owns credentials and sessions. `profiles` stores only product settings and references the provider's user identifier.
+The authentication provider will own credentials and sessions. `owners` is the provider-neutral Wip tenant root. Milestone 1B-2 maps a provider's immutable subject to an owner and adds strict RLS policies; provider subjects must not be used as free-form ownership keys throughout the product schema.
 
 ## 3. Core entities
 
-### `profiles`
+### `owners`
 
 Minimal user settings; not a demographic profile.
 
 | Field | Type | Meaning / constraint |
 | --- | --- | --- |
-| `user_id` | `uuid` PK | References the auth user; cascades on account deletion. |
+| `id` | `uuid` PK | Internal Wip owner identifier. |
+| `auth_provider` | `text` nullable | Reserved for the provider selected in Milestone 1B-2. |
+| `auth_subject` | `text` nullable | Provider's immutable subject; unique with provider when present. |
 | `timezone` | `text` | IANA timezone, required after onboarding. |
 | `locale` | `text` | Optional presentation locale. |
 | `week_starts_on` | `smallint` | Optional UI preference. |
@@ -65,13 +67,15 @@ The aggregate root and query index for one role at one employer.
 | Field | Type | Meaning / constraint |
 | --- | --- | --- |
 | `id` | `uuid` PK | Application identifier. |
-| `user_id` | `uuid` FK | Owner; indexed with all common list filters. |
+| `owner_id` | `uuid` FK | Owner; indexed with all common list filters. |
+| `public_id` | `text` | Stable owner-scoped route identifier. The fictional seed preserves Milestone 1A slugs. |
 | `company_name` | `text` | Required, trimmed, user-visible. |
 | `role_title` | `text` | Required, trimmed, user-visible. |
 | `location_text` | `text` | Optional source/user label; not geocoded in MVP. |
 | `source_url` | `text` | Optional original job URL. |
 | `source_name` | `text` | Optional source label, such as employer site or referral. |
-| `current_stage` | `text` | Cached projection: `saved`, `preparing`, `applied`, `interviewing`, `offer`, `accepted`, `rejected`, or `withdrawn`. |
+| `requisition_id` | `text` | Optional employer/ATS job identifier; scoped to this application and displayed as entered. |
+| `current_stage` | `text` | Cached projection: `saved`, `preparing`, `applied`, `assessment`, `interviewing`, `offer`, `accepted`, `rejected`, or `withdrawn`. |
 | `projected_applied_at` | `timestamptz` | Cached occurrence time of the effective confirmed submission event. |
 | `last_confirmed_event_at` | `timestamptz` | Cached occurrence time used for sorting. |
 | `active_snapshot_id` | `uuid` nullable FK | Snapshot selected for default display; must belong to this application. |
@@ -91,7 +95,7 @@ An immutable description capture. Database permissions should deny `UPDATE`; del
 | --- | --- | --- |
 | `id` | `uuid` PK | Snapshot identifier. |
 | `application_id` | `uuid` FK | Owning application. |
-| `user_id` | `uuid` FK | Denormalized owner for direct RLS and deletion. |
+| `owner_id` | `uuid` FK | Denormalized owner for same-owner constraints, future RLS, and deletion. |
 | `captured_at` | `timestamptz` | When the user captured or pasted the content. |
 | `capture_source` | `text` | `manual`, `extension`, or future approved import. |
 | `source_url` | `text` | URL visible at capture time, if any. |
@@ -104,7 +108,7 @@ An immutable description capture. Database permissions should deny `UPDATE`; del
 | `capture_metadata` | `jsonb` | Versioned non-sensitive fields such as selected extractor and warnings. |
 | `created_at` | `timestamptz` | Ingestion time; normally close to `captured_at`. |
 
-Do not retain a complete page DOM, cookies, scripts, tracking pixels, unrelated page text, or browser history. The semantic snapshot definition is an assumption pending approval; see `docs/decisions.md`.
+Do not retain a complete page DOM, cookies, scripts, tracking pixels, unrelated page text, or browser history. The semantic snapshot definition is confirmed by C-014 in `docs/decisions.md`; screenshots and full-page archives are postponed.
 
 ### `application_events`
 
@@ -114,7 +118,7 @@ The chronological fact/proposal stream.
 | --- | --- | --- |
 | `id` | `uuid` PK | Event identifier. |
 | `application_id` | `uuid` FK | Owning application. |
-| `user_id` | `uuid` FK | Denormalized owner for RLS and deletion. |
+| `owner_id` | `uuid` FK | Denormalized owner for same-owner constraints, future RLS, and deletion. |
 | `event_type` | `text` | Stable namespaced event type. |
 | `occurred_at` | `timestamptz` | When the event is believed to have happened. |
 | `source` | `text` | `manual`, `extension`, `email_extraction`, `import`, or `system`. |
@@ -126,10 +130,10 @@ The chronological fact/proposal stream.
 | `source_reference_id` | `uuid` nullable | Internal provenance reference; access-controlled. |
 | `supersedes_event_id` | `uuid` nullable FK | Earlier event corrected by this event. |
 | `idempotency_key` | `text` nullable | Unique per source/user boundary to prevent duplicate ingestion. |
-| `created_by_user_id` | `uuid` nullable | User actor for manual and confirmation actions. |
-| `created_at` | `timestamptz` | When WIP recorded the event. |
+| `created_by_owner_id` | `uuid` nullable | Owner actor for manual and confirmation actions. |
+| `created_at` | `timestamptz` | When Wip recorded the event. |
 
-The event's core fields (`event_type`, `occurred_at`, `source`, payload, provenance, creation time) become immutable after insert. `confirmation_state` is the one controlled state transition; each transition is also written to `event_confirmation_decisions`. A rejected proposal remains available for audit but is hidden from the normal confirmed timeline unless the user asks to show rejected suggestions.
+The event record is immutable after insert, including its initial `confirmation_state`. Milestone 1B-1 enforces that rule with a PostgreSQL update-rejection trigger. A later confirmation appends an `event_confirmation_decision`; the effective confirmation projection uses the latest valid decision rather than rewriting the proposed fact. A rejected proposal remains available for audit but is hidden from the normal confirmed timeline unless the user asks to show rejected suggestions.
 
 Suggested event taxonomy for the first implementation:
 
@@ -141,7 +145,7 @@ Suggested event taxonomy for the first implementation:
 | `employer.confirmation_received` | no stage change; records evidence of submission |
 | `employer.contact_received` | no automatic stage change unless payload identifies a specific invited step |
 | `screen.invited`, `screen.scheduled`, `screen.completed` | `interviewing` |
-| `assessment.requested`, `assessment.submitted` | normally retains current active stage |
+| `assessment.requested`, `assessment.submitted`, `assessment.completed` | `assessment`; covers online assessments, HireVues, coding tests, and take-home assignments |
 | `interview.invited`, `interview.scheduled`, `interview.completed` | `interviewing` |
 | `follow_up.sent` | no stage change |
 | `application.rejected` | `rejected` |
@@ -160,7 +164,7 @@ Append-only audit of proposal review.
 | --- | --- | --- |
 | `id` | `uuid` PK | Decision identifier. |
 | `event_id` | `uuid` FK | Reviewed event. |
-| `user_id` | `uuid` FK | Owner and actor. |
+| `owner_id` | `uuid` FK | Owner and actor. |
 | `decision` | `text` | `confirmed` or `rejected`. |
 | `reason_code` | `text` nullable | Optional structured rejection/correction reason. |
 | `decided_at` | `timestamptz` | Database-generated. |
@@ -176,7 +180,7 @@ Represents a logical user document.
 | Field | Type | Meaning / constraint |
 | --- | --- | --- |
 | `id` | `uuid` PK | Logical document identifier. |
-| `user_id` | `uuid` FK | Owner. |
+| `owner_id` | `uuid` FK | Owner. |
 | `kind` | `text` | `resume`, `cover_letter`, `portfolio`, or `other`. |
 | `name` | `text` | User label, such as “Product resume.” |
 | `created_at`, `updated_at` | `timestamptz` | Audit timestamps. |
@@ -187,7 +191,7 @@ Represents a logical user document.
 | --- | --- | --- |
 | `id` | `uuid` PK | Version identifier. |
 | `document_id` | `uuid` FK | Logical document. |
-| `user_id` | `uuid` FK | Owner. |
+| `owner_id` | `uuid` FK | Owner. |
 | `version_label` | `text` | User-visible version, e.g. `2026-08 product`. |
 | `original_filename` | `text` nullable | Metadata only; sanitize before display. |
 | `content_sha256` | `text` nullable | Allows exact version matching without keeping content. |
@@ -216,7 +220,7 @@ Do not repoint an existing use to a different version. Insert a corrected associ
 
 ### `contacts` and `application_contacts`
 
-`contacts` stores a user-owned person with `display_name`, optional `organization`, `role_title`, `email`, `phone`, `profile_url`, and timestamps. Every field other than display name is optional. WIP does not enrich contacts automatically in the scoped roadmap.
+`contacts` stores a user-owned person with `display_name`, optional `organization`, `role_title`, `email`, `phone`, `profile_url`, and timestamps. Every field other than display name is optional. Wip does not enrich contacts automatically in the scoped roadmap.
 
 `application_contacts` links a contact to an application with a `relationship` such as `recruiter`, `referrer`, `interviewer`, `hiring_manager`, or `other`, plus timestamps. The link allows one recruiter to participate in multiple applications without duplicating the contact.
 
@@ -227,7 +231,7 @@ Contact details are personal data. They are excluded from aggregate contribution
 | Field | Type | Meaning / constraint |
 | --- | --- | --- |
 | `id` | `uuid` PK | Note identifier. |
-| `application_id`, `user_id` | `uuid` FK | Ownership path. |
+| `application_id`, `owner_id` | `uuid` FK | Ownership path. |
 | `body` | `text` | User-authored Markdown/plain text; render with strict sanitization. |
 | `pinned` | `boolean` | Optional presentation flag. |
 | `created_at`, `updated_at` | `timestamptz` | Audit timestamps. |
@@ -239,7 +243,7 @@ Notes are operational private content. They are not parsed for hiring statistics
 | Field | Type | Meaning / constraint |
 | --- | --- | --- |
 | `id` | `uuid` PK | Action identifier. |
-| `application_id`, `user_id` | `uuid` FK | Ownership path. |
+| `application_id`, `owner_id` | `uuid` FK | Ownership path. |
 | `title` | `text` | Required short task. |
 | `details` | `text` nullable | Optional private context. |
 | `due_at` | `timestamptz` nullable | Due time in UTC. |
@@ -254,12 +258,12 @@ Action creation, completion, rescheduling, and cancellation may append non-stage
 
 ### `aggregation_consents`
 
-Consent is an append-only ledger, not a boolean hidden on `profiles`.
+Consent is an append-only ledger, not a boolean hidden on `owners`.
 
 | Field | Type | Meaning / constraint |
 | --- | --- | --- |
 | `id` | `uuid` PK | Consent decision identifier. |
-| `user_id` | `uuid` FK | Decision owner. |
+| `owner_id` | `uuid` FK | Decision owner. |
 | `decision` | `text` | `granted` or `withdrawn`. |
 | `policy_version` | `text` | Exact disclosure version shown. |
 | `scope` | `jsonb` | Versioned, validated list of contributed measures/dimensions. |
@@ -293,7 +297,7 @@ The flow is one-way and least-privileged:
 4. The product API can read only released aggregate rows; it cannot query private facts.
 5. Consent withdrawal or deletion removes linked private facts, refreshes affected aggregates, and prevents future contribution.
 
-The released data describes participating WIP users, not the total applicant population. No public endpoint exposes row-level facts or small slices.
+The released data describes participating Wip users, not the total applicant population. No public endpoint exposes row-level facts or small slices.
 
 ## 7. Future inbound-email records
 
@@ -306,12 +310,20 @@ The transient object is deleted immediately after a successful extraction propos
 
 ## 8. Authorization, indexing, and integrity
 
-- Enable RLS on every exposed table. Ownership policies compare the authenticated user ID with the row's `user_id`; join tables must also validate both referenced objects belong to the same user.
-- Keep service-role access server-side and limited to isolated workers. Normal web requests and extension API calls should preserve the user's identity so RLS still applies.
+- Milestone 1B-1 puts `owner_id` on every owned relation, uses composite `(owner_id, id)` parent keys for same-owner foreign keys, and scopes every repository query. It does not claim authenticated database isolation because authentication is not yet present.
+- Milestone 1B-2 must enable and force RLS on every exposed table, create a least-privilege non-owner runtime role, derive the owner context from the authenticated server request, and test cross-owner reads, writes, and joins. Neon database owner credentials are migration-only, never a normal browser/request credential.
 - Add indexes for active application lists, event timelines, due actions, pending confirmations, snapshot versions, document uses, and consent lookup.
 - Use database triggers or transactional command handlers to reject cross-user references, snapshot updates, invalid confirmation transitions, and direct projection writes.
 - Enforce unique idempotency keys within the relevant source/owner scope.
 - Make seed data entirely fictional and associate it only with development/test identities.
+
+### Milestone 1B-1 physical schema
+
+The checked-in Drizzle schema and SQL migrations implement eleven tables: `owners`, `applications`, `application_events`, `job_description_snapshots`, `documents`, `document_versions`, `application_document_uses`, `contacts`, `application_contacts`, `notes`, and `next_actions`. Application routes use owner-scoped `public_id` values while internal and relationship identifiers are UUIDs. PostgreSQL enums constrain stages and other small taxonomies; common owner/list/timeline/action paths are indexed.
+
+Database triggers reject `UPDATE` on events, job-description snapshots, and document versions. Every owned table has `owner_id`, and every child relationship uses a composite owner/reference foreign key where applicable. The seed's owner and row IDs are deterministic so repeated runs are idempotent.
+
+`event_confirmation_decisions`, aggregation consent, inbox processing, analytics schemas, auth-backed RLS policies, and write-side projection transactions remain conceptual parts of the later model and are deliberately absent from the 1B-1 migration.
 
 ## 9. Deletion and export implications
 

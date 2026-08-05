@@ -1,17 +1,17 @@
-# WIP privacy baseline
+# Wip privacy baseline
 
 Status: product and engineering requirements; not a public legal policy  
 Last updated: 2026-08-04
 
 ## 1. Privacy promise
 
-WIP is a private job-search record first. A person must be able to use the tracker without contributing to aggregate hiring statistics, granting broad browser access, or connecting an email inbox. Automation is user-invoked or based on email the user intentionally forwards. Consequential automated status changes require confirmation.
+Wip is a private job-search record first. A person must be able to use the tracker without contributing to aggregate hiring statistics, granting broad browser access, or connecting an email inbox. Automation is user-invoked or based on email the user intentionally forwards. Consequential automated status changes require confirmation.
 
 This document defines product behavior and engineering constraints. Before a public beta, counsel should review the actual privacy notice, terms, subprocessors, retention schedule, and regional obligations.
 
-## 2. Data WIP collects
+## 2. Data Wip collects
 
-WIP collects only what is needed for an enabled feature.
+Wip collects only what is needed for an enabled feature.
 
 ### Account and settings
 
@@ -33,23 +33,29 @@ The MVP stores document-version metadata, not resume or cover-letter file conten
 
 ### Extension capture data
 
-After the user invokes the extension, WIP may read the current tab's URL, title, and selected job-description content. The extension sends a previewed job-content snapshot and required metadata to WIP only when the user saves it. It does not collect general browsing history or run persistent collection across sites.
+After the user invokes the extension, Wip may read the current tab's URL, title, and selected job-description content. The extension sends a previewed job-content snapshot and required metadata to Wip only when the user saves it. It does not collect general browsing history or run persistent collection across sites.
 
 ### Forwarded recruiting email, later
 
-When a user intentionally forwards an email to their WIP address, WIP may temporarily process sender/recipient metadata, subject, text/HTML body, headers required for threading/provenance, and attachments required for extraction. Structured outputs are limited to application matching, event type, occurrence time, source, confidence, and a minimal evidence excerpt if necessary for confirmation.
+When a user intentionally forwards an email to their Wip address, Wip may temporarily process sender/recipient metadata, subject, text/HTML body, headers required for threading/provenance, and attachments required for extraction. Structured outputs are limited to application matching, event type, occurrence time, source, confidence, and a minimal evidence excerpt if necessary for confirmation.
 
-Raw forwarded-email content is transient. WIP deletes its raw copy immediately after a structured result is safely persisted, targeted within 24 hours of successful extraction. Failed processing may retain a private raw object for retries, with an automatic deletion backstop no later than seven days after receipt plus the storage provider's documented lifecycle-processing delay. A user may explicitly choose to save the original; that choice must explain the new retention behavior.
+Raw forwarded-email content is transient. Wip deletes its raw copy immediately after a structured result is safely persisted, targeted within 24 hours of successful extraction. Failed processing may retain a private raw object for retries, with an automatic deletion backstop no later than seven days after receipt plus the storage provider's documented lifecycle-processing delay. A user may explicitly choose to save the original; that choice must explain the new retention behavior.
 
-An inbound-email vendor cannot be launched unless its own retention and deletion controls are compatible with this disclosure. Vendor-held copies count as raw email; WIP cannot claim deletion while an uncontrolled provider copy remains accessible.
+An inbound-email vendor cannot be launched unless its own retention and deletion controls are compatible with this disclosure. Vendor-held copies count as raw email; Wip cannot claim deletion while an uncontrolled provider copy remains accessible.
 
 ### Operational telemetry
 
-WIP may collect minimal security and reliability data such as request time, route, coarse device/browser class, error code, deployment version, and randomized session identifier. Logs must not contain snapshot text, notes, contact details, document names, raw emails, access tokens, full source URLs with query strings, or event payloads. Product analytics, if added, needs a separate disclosure and must not imply consent to Hiring Pulse contribution.
+Wip may collect minimal security and reliability data such as request time, route, coarse device/browser class, error code, deployment version, and randomized session identifier. Logs must not contain snapshot text, notes, contact details, document names, raw emails, access tokens, full source URLs with query strings, or event payloads. Product analytics, if added, needs a separate disclosure and must not imply consent to Hiring Pulse contribution.
 
-## 3. Data WIP does not collect
+### PostgreSQL persistence boundary
 
-WIP must not ask for, create fields for, infer, import, log, or store an applicant's:
+Neon PostgreSQL is the operational system of record selected for Milestone 1B-1. The database receives only the tracker fields listed above; choosing Neon does not expand collection. Database connection strings are server-only secrets and must never be exposed to browser JavaScript, extension code, public environment variables, logs, fixtures, or screenshots.
+
+Milestone 1B-1 contains fictional demo data only and scopes every read by an explicit internal owner identifier. This application-layer scope is a foundation, not a claim of production tenant isolation. Before real-user data, Milestone 1B-2 must add authenticated owner mapping, a least-privilege runtime database role, enforced PostgreSQL RLS, cross-owner security tests, and documented Neon backup/branch deletion behavior. Database integration tests must use a disposable branch or database containing fictional data only.
+
+## 3. Data Wip does not collect
+
+Wip must not ask for, create fields for, infer, import, log, or store an applicant's:
 
 - EEO questionnaire answers;
 - race or ethnicity;
@@ -59,12 +65,12 @@ WIP must not ask for, create fields for, infer, import, log, or store an applica
 - Social Security number or other national identifier; or
 - birthdate.
 
-WIP also does not collect:
+Wip also does not collect:
 
 - passwords for employer or applicant-tracking systems;
 - full browsing history;
 - inbox-wide email access in the scoped roadmap;
-- background page contents from tabs the user did not invoke WIP on;
+- background page contents from tabs the user did not invoke Wip on;
 - precise location from the device;
 - contact enrichment purchased or scraped from third parties; or
 - data for auto-applying, mass submitting, or scoring an applicant's employability.
@@ -82,7 +88,7 @@ Operational user data is used to:
 - extract proposed events from intentionally forwarded email; and
 - support export, deletion, security, and troubleshooting.
 
-WIP must not sell personal tracker data, use it for targeted advertising, expose it to employers, or train a generally available model on it without a new explicit opt-in agreement. Model-processing terms, retention, and training controls must be reviewed before Milestone 3.
+Wip must not sell personal tracker data, use it for targeted advertising, expose it to employers, or train a generally available model on it without a new explicit opt-in agreement. Model-processing terms, retention, and training controls must be reviewed before Milestone 3.
 
 ## 5. Hiring Pulse contribution
 
@@ -115,7 +121,7 @@ For conditional measures such as offer acceptance, the qualifying denominator mu
 
 ### Statistical claims
 
-Hiring Pulse describes activity among consenting WIP contributors within the displayed cohort and time window. It must not be described as:
+Hiring Pulse describes activity among consenting Wip contributors within the displayed cohort and time window. It must not be described as:
 
 - the true total applicant population;
 - a representative sample of all applicants;
@@ -129,7 +135,7 @@ Every aggregate surface must display a plain-language caveat about opt-in select
 
 - Users can access only their own tracker data. Database row-level security and application authorization both enforce this boundary.
 - Support access is deny-by-default, time-limited, audited, and used only with the user's authorization or for documented security/legal necessity.
-- The extension uses temporary `activeTab` access after a user gesture and a narrow WIP API origin. It does not request `<all_urls>`, cookies, browsing history, or network interception.
+- The extension uses temporary `activeTab` access after a user gesture and a narrow Wip API origin. It does not request `<all_urls>`, cookies, browsing history, or network interception.
 - Email workers, extractors, and analytics jobs use separate credentials with access only to their required queue, storage prefix, schema, or endpoint.
 - Raw email object storage is private, encrypted, not CDN-cached, and protected by explicit object deletion plus an expiry rule.
 
@@ -187,11 +193,11 @@ Withdrawing Hiring Pulse consent:
 - recomputes affected released cells or suppresses them if they fall below thresholds; and
 - records the withdrawal and policy version without requiring a reason.
 
-Withdrawal must be as easy to find and execute as opt-in. WIP should show completion state and communicate if aggregate recomputation is asynchronous.
+Withdrawal must be as easy to find and execute as opt-in. Wip should show completion state and communicate if aggregate recomputation is asynchronous.
 
 ## 11. Incident and vendor requirements
 
-Before production use of any auth, hosting, email, model, analytics, error-tracking, or storage provider, record:
+Before production use of Neon, any auth provider, hosting, email, model, analytics, error-tracking, or storage provider, record:
 
 - data categories sent;
 - processing region and subprocessors;

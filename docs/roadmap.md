@@ -1,6 +1,6 @@
-# WIP roadmap
+# Wip roadmap
 
-Status: proposed milestone sequence  
+Status: active milestone sequence
 Last updated: 2026-08-04
 
 ## Delivery rules across milestones
@@ -29,28 +29,113 @@ Create an implementable, privacy-aware product baseline without building the pro
 
 All application scaffolding, production services, UI implementation, extension code, email ingestion, analytics jobs, and vendor provisioning.
 
-## Milestone 1 — Manually managed web tracker
+## Milestone 1A — Front-end vertical prototype
 
 ### Goal
 
-Deliver a responsive web tracker that is genuinely useful with manual data and has seeded fictional demo data for development, testing, and demonstration.
+Deliver a runnable, responsive Next.js prototype that validates Wip's primary information architecture and visual direction using only deterministic fictional seed data.
 
 ### User-visible scope
 
-- Sign in and sign out.
+- Today dashboard with upcoming interviews/assessments, overdue follow-ups, applications awaiting responses, recently changed applications, and a compact stage summary.
+- Applications list with a desktop table, mobile cards, search, stage filtering, and basic sorting.
+- Application detail with company/role facts, source URL, requisition ID, complete chronological timeline, semantic job snapshot, resume and cover-letter metadata, contacts, notes, and next action.
+- “Wip” text wordmark and a calm, optimistic consumer visual direction for students and early-career applicants.
+
+### Technical scope
+
+- Scaffold the pnpm/Turborepo workspace, `apps/web`, and only the shared domain package that already provides clear value.
+- Use strict TypeScript and the Next.js App Router.
+- Keep deterministic fictional seed data behind a small read-only repository/data-source interface that can later be implemented by a persistent adapter.
+- Implement pure, tested calculations for stage counts, upcoming scheduled events, overdue follow-ups, awaiting-response heuristics, recent changes, filtering, and sorting.
+- Add focused component/interaction tests and a production build check.
+- Add concise README setup and run instructions.
+
+### Acceptance criteria
+
+1. Approximately 12 fictional applications cover every confirmed stage: `saved`, `preparing`, `applied`, `assessment`, `interviewing`, `offer`, `accepted`, `rejected`, and `withdrawn`.
+2. No seed fixture contains real personal information, prohibited applicant data, real recruiting email, or access credentials.
+3. Today renders each required section from domain calculations rather than hard-coded summary totals.
+4. Applications supports keyboard-accessible search, stage filter, and sort controls; table rows/cards link to detail routes.
+5. Desktop uses a readable table, while narrow screens use cards without horizontal scrolling.
+6. Detail renders the complete oldest-to-newest timeline and all requested snapshot, document metadata, contact, note, and next-action information.
+7. Components do not import seed arrays directly; they read through the data boundary.
+8. Responsive layouts, semantic landmarks, focus states, color contrast, reduced motion, and form labels pass browser review.
+9. Formatting, lint, strict type-check, relevant tests, and a production build pass.
+10. No database, authentication, extension, email, persistent storage, Hiring Pulse, or Kanban implementation is present.
+
+### Deliberately postponed
+
+- All backend integration and Milestone 1B work.
+- Neon PostgreSQL, authentication, RLS, `/api/v1`, persistence, and production data isolation.
+- Create/edit/delete commands, export, and deletion workflows.
+- Kanban until the end of Milestone 1.
+- Google authentication until before the external beta.
+- Chrome extension, forwarded email, and Hiring Pulse.
+
+## Milestone 1B-1 — Neon persistence foundation
+
+### Goal
+
+Translate the event-first model into a deployable PostgreSQL foundation and prove read parity with Milestone 1A without admitting real users or adding mutations.
+
+### User-visible scope
+
+- Preserve Today, Applications, and Application Detail behavior.
+- Permit an explicitly configured local instance to read the same twelve fictional applications from Neon.
+- Preserve the in-memory demo repository for tests and deliberate local demos.
+
+### Technical scope
+
+- Add `packages/database` with Drizzle schema, drizzle-kit configuration, checked-in SQL migrations, a Neon HTTP runtime client, and an idempotent database seed.
+- Model owners, applications, immutable events and semantic snapshots, document/version metadata and uses, contacts and links, notes, and next actions as normalized PostgreSQL tables.
+- Put non-null `owner_id` on every user-owned relation, enforce same-owner references with composite keys, and make every repository read owner-scoped.
+- Use a pooled `DATABASE_URL` for Next.js reads and a direct `DIRECT_DATABASE_URL` for migrations. Keep both server-only.
+- Implement a Neon adapter behind the existing `ApplicationRepository`; do not import Drizzle into UI components.
+- Add integration tests for applying migrations, repeatable seeding, repository reads, chronological event order, and owner isolation.
+
+### Acceptance criteria
+
+1. A clean database can be created entirely from the checked-in SQL migrations; no automatic schema push is required.
+2. Running the fictional seed twice creates the same twelve applications and no duplicate child records.
+3. Neon-backed Today, Applications, and detail reads produce the same domain shape and behavior as the in-memory source.
+4. Events are returned oldest-to-newest even when inserted out of order.
+5. Supplying one owner ID cannot return or link rows owned by another owner in repository queries or schema constraints.
+6. Snapshots and event facts are protected from in-place update by database rules; corrections remain append-oriented.
+7. Missing Neon variables prevent Neon selection with a clear server-side error. Production does not silently activate demo data.
+8. Database URLs cannot enter client bundles and use separate pooled runtime and direct migration variables.
+9. Formatting, lint, strict type-check, unit/UI tests, production build, and non-database checks pass. Live integration results are reported only when a configured disposable Neon test database is available.
+
+### Deliberately postponed
+
+- Authentication, sessions, provider webhooks, user onboarding, and auth-derived owner context.
+- RLS policies and a least-privilege runtime role tied to authenticated identity; these are required in 1B-2 before real-user data.
+- All application, event, snapshot, document, contact, note, and action mutations.
+- `/api/v1`, transactional command handling, export, deletion, and production deployment.
+- Kanban, extension, email ingestion, Hiring Pulse, and file upload/content storage.
+
+## Milestone 1B-2 — Authenticated manual tracker completion
+
+### Goal
+
+Replace the fictional adapter with the production web system of record and complete the manually managed tracker without rewriting the Milestone 1A screens.
+
+### User-visible scope
+
+- Sign in and sign out using the provider and methods confirmed at the start of 1B-2. Clerk is the leading candidate, not yet a final decision.
 - Create, edit, archive, restore, and delete applications.
 - Paste and save immutable job-description snapshots.
 - Add backdated or current manual timeline events and see the derived current stage.
 - Record document-version metadata and mark exact versions as prepared/submitted.
 - Manage contacts, notes, and next actions.
-- Use Today, applications table, Kanban, and application detail on desktop and mobile.
+- Use Today, applications table, and application detail on desktop and mobile; add Kanban at the end of Milestone 1B-2.
 - Complete/reschedule actions and see in-app due/overdue states in the user's timezone.
 - Export personal data in a lossless JSON baseline.
 
 ### Technical scope
 
-- Create the pnpm/Turborepo TypeScript monorepo and `apps/web` only.
-- Implement Next.js App Router, Supabase Auth/Postgres, SQL migrations, RLS, typed validation, and `/api/v1` command/query routes.
+- Build on the pnpm/Turborepo TypeScript monorepo and `apps/web` established in Milestone 1A.
+- Integrate the selected auth provider with the existing Neon PostgreSQL/Drizzle foundation, auth-derived owner context, least-privilege database access, RLS, typed validation, and `/api/v1` command/query routes.
 - Implement shared event taxonomy, stage projector, confirmation policy, and Today calculations as tested pure domain code.
 - Add deterministic fictional seed data that covers active, overdue, interviewing, offer, rejected, archived, multiple-snapshot, and multiple-document-version states.
 - Establish CI for lint, strict type-check, unit/integration tests, database/RLS tests, and a small Playwright critical path.
@@ -92,7 +177,7 @@ Let a signed-in user intentionally capture the current job page into the tracker
 
 ### User-visible scope
 
-- Install the Manifest V3 extension and connect it to the WIP account.
+- Install the Manifest V3 extension and connect it to the Wip account.
 - Click the extension action on a job page.
 - Preview/edit detected company, role, location, URL, and job description.
 - Create a new application or add a new immutable snapshot to an existing application.
@@ -101,7 +186,7 @@ Let a signed-in user intentionally capture the current job page into the tracker
 ### Technical scope
 
 - Add `apps/extension` using WXT and shared domain/schema/API packages.
-- Use packaged code, MV3 service worker behavior, user-invoked `activeTab`, `scripting`, `storage`, a narrow WIP API host permission, and the approved auth flow.
+- Use packaged code, MV3 service worker behavior, user-invoked `activeTab`, `scripting`, `storage`, a narrow Wip API host permission, and the approved auth flow.
 - Implement standards-first extraction: `JobPosting` JSON-LD, semantic document regions, then bounded generic heuristics. Isolate any site adapters and test them against committed synthetic fixtures.
 - Sanitize and validate in both extension and server; the server remains authoritative.
 - Store page content only transiently in the extension and clear it after save/cancel.
@@ -176,7 +261,7 @@ Turn intentionally forwarded recruiting emails into transparent, confidence-scor
 
 ### Goal
 
-Show privacy-protected aggregate hiring timelines and rates from explicitly consenting WIP contributors, with transparent definitions and limitations.
+Show privacy-protected aggregate hiring timelines and rates from explicitly consenting Wip contributors, with transparent definitions and limitations.
 
 ### Initial measures
 
@@ -210,7 +295,7 @@ Show privacy-protected aggregate hiring timelines and rates from explicitly cons
 5. Cells below any threshold are suppressed, and complementary/differencing tests prevent trivial recovery of a small cell.
 6. Consent withdrawal stops new contribution, removes linked private facts, refreshes impacted aggregates, and does not delete the private tracker.
 7. Account/application deletion follows the same removal and recomputation path.
-8. Every aggregate display states that it reflects consenting WIP contributors rather than the true total applicant population and shows the metric definition/denominator.
+8. Every aggregate display states that it reflects consenting Wip contributors rather than the true total applicant population and shows the metric definition/denominator.
 9. Statistical, privacy, security, and accessibility reviews are completed before public release.
 
 ### Deliberately postponed
@@ -224,15 +309,14 @@ Show privacy-protected aggregate hiring timelines and rates from explicitly cons
 
 ## Suggested sequencing within Milestone 1
 
-1. Approve the blocking assumptions in `docs/decisions.md`.
-2. Scaffold workspace, quality tools, environments, CI, and local Supabase.
-3. Add migrations, RLS, seed data, generated types, and database tests.
-4. Implement shared schemas/domain projector and unit tests.
-5. Implement auth, application commands/API, and deletion/export foundations.
-6. Build the application-detail vertical slice, including snapshots/events/actions.
-7. Build Today and table query projections.
-8. Add Kanban over the same query/commands.
-9. Add document versions, contacts, and notes.
-10. Complete responsive/accessibility, Playwright, security/privacy, and documentation review.
+1. **Milestone 1A:** scaffold the workspace and quality tooling.
+2. Add the shared domain types/calculations and deterministic fictional repository.
+3. Build Today, Applications table/cards, and Application Detail.
+4. Complete responsive/accessibility, interaction tests, browser QA, and production build validation; stop at the 1A boundary.
+5. **Milestone 1B-1:** add Neon/Drizzle schema, checked-in migrations, fictional idempotent seed, read repository, and database integration tests.
+6. **Milestone 1B-2:** select/integrate authentication, establish least-privilege runtime access and RLS, then add `/api/v1` application commands.
+7. Add creation/editing, immutable persisted snapshots/events/actions, export, and deletion foundations.
+8. Add Kanban over the same query/commands at the end of Milestone 1.
+9. Complete cross-user, security/privacy, and end-to-end validation before beta.
 
-The detail vertical slice comes before dashboard polish because it validates the event model, ownership boundary, and core editing workflow early.
+Milestone 1A validates the screens and read model first. Milestone 1B-1 proves persistent read parity; 1B-2 then adds authenticated production behavior without changing every component.

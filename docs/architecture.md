@@ -1,6 +1,6 @@
-# WIP recommended architecture
+# Wip recommended architecture
 
-Status: proposed Milestone 0 architecture  
+Status: accepted through Milestone 1B-1
 Last updated: 2026-08-04  
 Decision horizon: optimize Milestones 1–2; preserve clean boundaries for Milestones 3–4
 
@@ -8,12 +8,12 @@ Decision horizon: optimize Milestones 1–2; preserve clean boundaries for Miles
 
 Use a TypeScript monorepo with four explicit product boundaries, but deploy only what the current milestone needs:
 
-1. **Web system of record:** Next.js App Router on Vercel, backed by Supabase Postgres and Supabase Auth.
+1. **Web system of record:** Next.js App Router on Vercel, backed by Neon PostgreSQL. Authentication is a separate Milestone 1B-2 integration; Clerk is the leading candidate, not a confirmed selection.
 2. **Extension capture layer:** Chrome Manifest V3 extension built with WXT, using a popup and user-invoked `activeTab` extraction.
 3. **Inbound-email processing:** a separate Cloudflare Email Worker, private R2 transient storage, and queue consumer added in Milestone 3.
 4. **Aggregate analytics:** isolated Postgres schemas and scheduled derivation jobs added in Milestone 4; move to a warehouse only when scale or query isolation justifies it.
 
-Use pnpm workspaces for dependency management and Turborepo for dependency-aware tasks/cache. Keep shared domain contracts, validation, API client, and UI primitives in packages. Do not create extension, email, or analytics deployment scaffolding during Milestone 1 unless a shared package genuinely needs its contract.
+Use pnpm workspaces for dependency management and Turborepo for dependency-aware tasks/cache. Keep shared domain contracts, validation, database access, API client, and UI primitives in packages once each boundary provides clear value. Milestone 1B-1 adds `packages/database` for Drizzle schema, migrations, and seed logic while the application-facing repository contract remains in the web app. Do not create authentication, extension, email, or analytics deployment scaffolding during Milestone 1B-1.
 
 The recommendation favors a solo developer's delivery speed, managed free/low-cost starting tiers, portable PostgreSQL data, and the ability to split heavy workers later. Pricing changes frequently; verify current plan terms before provisioning rather than encoding numeric cost promises here.
 
@@ -25,7 +25,8 @@ flowchart LR
     User --> Extension["MV3 extension\nuser-invoked capture"]
     WebUI --> WebAPI["Next.js web/API\nsystem of record"]
     Extension -->|"reviewed snapshot over /api/v1"| WebAPI
-    WebAPI --> DB["Supabase Postgres\nRLS + Auth"]
+    WebAPI --> DB["Neon PostgreSQL\nsystem of record"]
+    Auth["Auth provider\nMilestone 1B-2"] -.-> WebAPI
 
     Mail["Forwarded recruiting email"] --> EmailWorker["Email routing Worker\nverify recipient + store transiently"]
     EmailWorker --> Raw["Private R2\nshort TTL"]
@@ -52,16 +53,14 @@ wip/
 │   ├── extension/              # Milestone 2: WXT Manifest V3 extension
 │   └── email-ingest/           # Milestone 3: Cloudflare email + queue worker
 ├── packages/
-│   ├── api-client/             # Typed, versioned HTTP client used by web/extension/workers
-│   ├── domain/                 # Event types, reducers, policies, pure use-case logic
+│   ├── api-client/             # Later: typed HTTP client when a real API exists
+│   ├── database/               # Drizzle schema, migrations, server DB factory, seed
+│   ├── domain/                 # Event types, calculations, pure use-case logic
+│   ├── fixtures/               # Fictional deterministic data shared by demo + DB seed
 │   ├── schemas/                # Shared runtime validation and serialized contracts
 │   ├── ui/                     # Accessible shared React primitives/tokens
 │   ├── eslint-config/          # Shared lint configuration
 │   └── typescript-config/      # Strict shared tsconfig bases
-├── supabase/
-│   ├── migrations/             # SQL schema, RLS, functions, projections
-│   ├── seed.sql                # Fictional development/test seed data only
-│   └── tests/                  # Database/RLS tests
 ├── docs/
 ├── package.json
 ├── pnpm-lock.yaml
@@ -69,7 +68,7 @@ wip/
 └── turbo.json
 ```
 
-Do not add `apps/email-ingest` until Milestone 3. Aggregate derivation can begin as migrations/database functions plus scheduled jobs; add a separate `apps/analytics-worker` only if the work cannot safely fit a short idempotent database or server job.
+Milestone 1B-1 adds only `packages/database` and the smallest fixture package needed to share the twelve fictional applications between the in-memory adapter and database seed. The remaining shown directories describe later target boundaries, not required empty scaffolds. Do not add `apps/extension` until Milestone 2 or `apps/email-ingest` until Milestone 3. Aggregate derivation can begin as migrations/database functions plus scheduled jobs; add a separate `apps/analytics-worker` only if the work cannot safely fit a short idempotent database or server job.
 
 ## 4. Current options considered
 
@@ -89,11 +88,11 @@ Official references: [Next.js App Router](https://nextjs.org/docs/app), [Next.js
 
 | Option | Advantages | Costs / risks | Decision |
 | --- | --- | --- | --- |
-| Supabase Postgres + Auth | Full PostgreSQL, integrated passwordless/social auth, local CLI workflow, and row-level security that can enforce per-user ownership at the data layer. | Multiple Supabase features can tempt direct client access and service-role overuse; RLS and grants must be tested explicitly. | **Recommend.** Use Postgres as the durable asset and preserve user JWT context through normal requests. |
-| Neon Postgres + separate auth | Excellent serverless Postgres behavior, branching, pooling, and provider separation. | A separate auth vendor and authorization integration add accounts, billing surfaces, and failure modes during the solo-developer stage. | Strong fallback if Supabase Auth or platform terms become unsuitable. |
+| Neon Postgres + separate auth | Serverless PostgreSQL, pooled runtime connections, direct migration connections, branching, and a database lifecycle that automatically wakes idle free computes on demand. It keeps auth replaceable. | A separate auth vendor must later be integrated with PostgreSQL authorization and RLS; the runtime role and session/transaction owner context need explicit design. | **Selected by C-022.** Use Drizzle ORM and Neon's serverless driver server-side. Authentication follows separately in Milestone 1B-2. |
+| Supabase Postgres + Auth | Full PostgreSQL with integrated passwordless/social auth and RLS-aware JWT integration. | Couples the database and auth platform; inactive free projects can require restoration behavior that the owner does not want for this project. | **Superseded.** Retained for decision history; do not add new Supabase dependencies or project structure. |
 | SQLite/server-local database | Very cheap and simple locally. | Multi-device accounts, serverless deployment, concurrency, backups, RLS, and later worker access require an early migration. | Development fixture only, not the product database. |
 
-Supabase provides a full Postgres database, and its documentation requires RLS on exposed tables; Auth issues JWTs that integrate with RLS. Neon is a portable alternative with autoscaling and branching. Official references: [Supabase database](https://supabase.com/docs/guides/database/overview), [Supabase Auth](https://supabase.com/docs/guides/auth), [Supabase RLS](https://supabase.com/docs/guides/database/postgres/row-level-security), [securing the Supabase Data API](https://supabase.com/docs/guides/api/securing-your-api), and [Neon overview](https://neon.com/docs/introduction).
+Neon's serverless driver provides HTTP and WebSocket transports. Wip uses the HTTP transport for its current one-shot, non-interactive read queries; an interactive transaction requirement should trigger a deliberate re-evaluation. Runtime requests use the pooled URL containing the `-pooler` hostname, while drizzle-kit uses the direct URL because Neon recommends direct connections for migrations. Free computes suspend when idle and automatically reactivate on a query. Official references: [Neon serverless driver](https://neon.com/docs/serverless/serverless-driver), [Neon connection pooling](https://neon.com/docs/connect/connection-pooling), [Neon scale to zero](https://neon.com/docs/introduction/scale-to-zero), [Drizzle with Neon](https://orm.drizzle.team/docs/get-started/neon-new), [drizzle-kit generate](https://orm.drizzle.team/docs/drizzle-kit-generate), and [drizzle-kit migrate](https://orm.drizzle.team/docs/drizzle-kit-migrate).
 
 ### Monorepo tooling
 
@@ -109,7 +108,7 @@ Official references: [pnpm workspaces](https://pnpm.io/workspaces), [Turborepo c
 
 | Option | Advantages | Costs / risks | Decision |
 | --- | --- | --- | --- |
-| WXT + React popup | Generates extension entrypoints/manifests, supports MV3 and TypeScript, provides development/reload tooling, and still uses standard Chrome APIs. | Adds a framework abstraction and multi-browser features that WIP may not immediately use. | **Recommend** for Milestone 2, while keeping extraction/domain code framework-independent. |
+| WXT + React popup | Generates extension entrypoints/manifests, supports MV3 and TypeScript, provides development/reload tooling, and still uses standard Chrome APIs. | Adds a framework abstraction and multi-browser features that Wip may not immediately use. | **Recommend** for Milestone 2, while keeping extraction/domain code framework-independent. |
 | Plain MV3 + Vite | Smallest dependency surface and closest to Chrome documentation. | More custom build, manifest-per-environment, asset, reload, and test wiring for one developer. | Good fallback if WXT proves limiting. |
 
 WXT describes itself as an open-source web-extension framework and explicitly leaves extension API behavior to the platform. Chrome requires MV3 service workers and forbids remotely hosted executable code. Official references: [WXT introduction](https://wxt.dev/guide/introduction.html), [Chrome Manifest V3](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3), and [Chrome Scripting API](https://developer.chrome.com/docs/extensions/reference/api/scripting).
@@ -119,7 +118,7 @@ WXT describes itself as an open-source web-extension framework and explicitly le
 | Option | Advantages | Costs / risks | Decision |
 | --- | --- | --- | --- |
 | Cloudflare Email Routing → Worker → private R2 + Queue | Receives the raw message directly in a dedicated worker, permits explicit short-lived object storage, lifecycle deletion, queue retries, and tight separation from the web app. | Adds a second cloud platform, MIME parsing, queue/storage operations, and a separate deployment. Raw messages larger than queue limits require an object pointer. | **Provisional recommendation for Milestone 3** because retention is controllable and the boundary is clean. Prototype and privacy-review before committing. |
-| Resend Inbound webhook | Easiest Next.js integration, parsed message APIs, signatures, retries, and replay support. | Official docs state that Resend stores received mail; current public docs reviewed here do not establish the per-message deletion control WIP needs. | Do not select until retention/deletion is contractually and technically compatible with `docs/privacy.md`. |
+| Resend Inbound webhook | Easiest Next.js integration, parsed message APIs, signatures, retries, and replay support. | Official docs state that Resend stores received mail; current public docs reviewed here do not establish the per-message deletion control Wip needs. | Do not select until retention/deletion is contractually and technically compatible with `docs/privacy.md`. |
 | Direct Gmail/Outlook API | No forwarding habit for the user and access to threads. | Broad inbox authorization, complex provider verification, token storage, and far greater privacy surface. | Explicitly postponed; not in the scoped roadmap. |
 
 Official references: [Cloudflare Email Routing](https://developers.cloudflare.com/email-service/configuration/email-routing-addresses/), [Email Worker handler](https://developers.cloudflare.com/email-service/api/route-emails/email-handler/), [Cloudflare Queues](https://developers.cloudflare.com/queues/), [R2 object lifecycles](https://developers.cloudflare.com/r2/buckets/object-lifecycles/), [R2 data security](https://developers.cloudflare.com/r2/reference/data-security/), [Resend receiving](https://resend.com/docs/dashboard/receiving/introduction), and [Resend webhook delivery semantics](https://resend.com/docs/webhooks/introduction).
@@ -128,7 +127,7 @@ Official references: [Cloudflare Email Routing](https://developers.cloudflare.co
 
 ### Responsibilities
 
-`apps/web` owns:
+At production maturity, `apps/web` owns:
 
 - authentication UI and session handling;
 - responsive screens;
@@ -137,6 +136,8 @@ Official references: [Cloudflare Email Routing](https://developers.cloudflare.co
 - event validation, confirmation, and projection updates;
 - export/deletion orchestration; and
 - read models for Today, table/Kanban, and application detail.
+
+Milestone 1A implemented the responsive screens and read-oriented application boundary over fictional seed data. Milestone 1B-1 preserves those screens and adds a server-only Neon repository behind the same interface. Authentication, authenticated authorization, `/api/v1`, export/deletion orchestration, and write commands begin in Milestone 1B-2. The data source is selected explicitly; a missing Neon configuration may fall back to demo data only in development/test, never silently in production.
 
 Use Next.js Route Handlers for the stable external API because Server Actions are coupled to the web build and are not the right contract for an extension or worker. Web server components may call the same domain/application services directly, but there must be one implementation of each command rule.
 
@@ -167,21 +168,22 @@ Nested document, contact, and note endpoints can follow the same ownership patte
 
 - Put event taxonomy, stage reduction, confirmation policy, due/stale calculations, and aggregate eligibility into pure functions in `packages/domain`.
 - Put serializable input/output schemas in `packages/schemas` using a runtime validator such as Zod.
-- Use SQL migrations as the source of database schema truth. Generate TypeScript database types from the schema; do not hand-maintain a conflicting ORM schema.
+- Define the PostgreSQL model in `packages/database` with Drizzle's TypeScript schema and generate reviewable SQL migrations with drizzle-kit. Check both the schema and generated SQL into source control. Production changes run `drizzle-kit migrate`; automatic schema pushing is not a production strategy.
 - Perform event insertion, confirmation audit, and projection update transactionally.
-- Enable RLS and explicit grants on every exposed table. Write database tests that attempt cross-user reads/writes and invalid joins.
-- The browser receives only a public Supabase key if direct authenticated reads are deliberately used. Never ship the service-role key. Prefer web/API command handlers for all writes so audit and validation are centralized.
+- Every user-owned table has a non-null `owner_id`. Composite owner/identifier foreign keys prevent cross-owner relationships, and every repository query includes the owner predicate. Milestone 1B-2 must add a non-owner runtime role, auth-derived owner context, RLS policies, and tests that attempt cross-user reads/writes before real users are admitted.
+- `DATABASE_URL`, `DIRECT_DATABASE_URL`, and any privileged database access are server-only. They must never use a `NEXT_PUBLIC_` prefix, enter a browser bundle, or be sent to the extension. Prefer web/API command handlers for all writes so audit and validation are centralized.
+- The Neon HTTP driver is appropriate for the read-only, one-shot queries in 1B-1. Before implementing multi-statement interactive write transactions in 1B-2, verify whether the driver/ORM transaction support meets the command's atomicity needs; use Neon's WebSocket driver or another supported server-side transaction path if required.
 
 ## 6. Extension capture layer
 
 ### Flow
 
-1. The user clicks the WIP extension action on a job page.
+1. The user clicks the Wip extension action on a job page.
 2. `activeTab` grants temporary access; the service worker uses `chrome.scripting.executeScript` in the main frame.
 3. The extractor finds likely job-description content using semantic elements, JSON-LD `JobPosting`, and bounded generic heuristics. Site-specific adapters are optional and isolated.
 4. The popup shows title, company, location, source URL, and captured description with warnings for missing/ambiguous fields.
 5. The user edits/selects the target application or chooses “new application,” then saves.
-6. The extension sends validated capture data to the narrow WIP API origin. The server sanitizes again, hashes canonical content, and inserts the application/snapshot transactionally.
+6. The extension sends validated capture data to the narrow Wip API origin. The server sanitizes again, hashes canonical content, and inserts the application/snapshot transactionally.
 7. The extension clears transient page content from local/session storage after success or explicit cancel.
 
 Do not use a persistent content script across all pages, monitor navigation, scrape results pages in bulk, or access browser cookies. Extraction failure should allow manual selection/paste rather than escalating permission scope.
@@ -190,21 +192,21 @@ Do not use a persistent content script across all pages, monitor navigation, scr
 
 | Permission / manifest field | Stage | Why it is needed | Constraint |
 | --- | --- | --- | --- |
-| `activeTab` | Required M2 | Temporarily read the current page after the user invokes WIP. Chrome documents it as an alternative to persistent `<all_urls>` access. | Access lasts only for the invoked tab/origin and ends on navigation/close. |
+| `activeTab` | Required M2 | Temporarily read the current page after the user invokes Wip. Chrome documents it as an alternative to persistent `<all_urls>` access. | Access lasts only for the invoked tab/origin and ends on navigation/close. |
 | `scripting` | Required M2 | Run the packaged extractor in the active tab. | Execute only after a user gesture; main frame by default. |
 | `storage` | Required M2 | Keep settings, short-lived auth/session state, and an unsent capture draft. | Do not use as a second tracker or permanent job-description archive; clear page content promptly. |
-| Narrow `host_permissions` for the WIP API, e.g. `https://app.example.com/*` | Required M2 | Allow extension pages/service worker to call the system-of-record API. | Replace placeholder with exactly the production/preview API origins; never use `https://*/*`. |
+| Narrow `host_permissions` for the Wip API, e.g. `https://app.example.com/*` | Required M2 | Allow extension pages/service worker to call the system-of-record API. | Replace placeholder with exactly the production/preview API origins; never use `https://*/*`. |
 | `identity` | Likely M2 | Use `chrome.identity.launchWebAuthFlow` for a user-initiated, non-Google or Google OAuth flow and receive a redirect safely. | Store only revocable scoped credentials; final auth design is an unresolved M2 decision. |
 | `notifications` / `alarms` | Optional later | Deliver opt-in local reminders if that channel is selected. | Request at runtime when enabling the feature, not at install. |
-| `contextMenus` | Optional later | Add a user-invoked “Save job to WIP” context action. | Add only if user research supports it. |
+| `contextMenus` | Optional later | Add a user-invoked “Save job to Wip” context action. | Add only if user research supports it. |
 
 Do not request `tabs`, `history`, `cookies`, `webRequest`, `declarativeNetRequest`, `downloads`, `unlimitedStorage`, broad `content_scripts.matches`, or `<all_urls>` for the planned capture flow. `activeTab` already permits the needed tab URL/title and temporary script access. Chrome's permissions guidance recommends optional permissions where possible. References: [activeTab](https://developer.chrome.com/docs/extensions/develop/concepts/activeTab), [Scripting API permissions](https://developer.chrome.com/docs/extensions/reference/api/scripting), [Storage API](https://developer.chrome.com/docs/extensions/reference/api/storage), [Identity API](https://developer.chrome.com/docs/extensions/reference/api/identity), and [declaring/optional permissions](https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions).
 
 ### Authentication
 
-The preferred direction is a user-initiated `launchWebAuthFlow` to Supabase/Auth, followed by a short-lived access token and revocable extension refresh credential scoped to the WIP API. Store the access token in `chrome.storage.session`; if a refresh credential must persist, minimize its scope, rotate it, and store it only in extension storage—not page local storage. Never copy a web session cookie or request the `cookies` permission.
+Authentication is explicitly deferred to Milestone 1B-2. Clerk is the leading candidate, but neither the provider nor the launch sign-in methods are confirmed. The selected provider's immutable subject must map to Wip's internal owner record; provider claims must not become ad hoc ownership strings throughout the schema.
 
-Finalize and threat-model this flow at the start of Milestone 2. Supabase documents Google sign-in support for Chrome extensions, while Chrome's Identity API supports non-Google web auth flows. References: [Supabase Google login](https://supabase.com/docs/guides/auth/social-login/auth-google) and [Chrome Identity API](https://developer.chrome.com/docs/extensions/reference/api/identity).
+At the start of Milestone 2, threat-model a user-initiated `launchWebAuthFlow`, a short-lived access token, and a revocable extension credential scoped to the Wip API. Store access tokens in `chrome.storage.session`; if a refresh credential must persist, minimize its scope and rotate it. Never copy a web session cookie or request the `cookies` permission. Reference: [Chrome Identity API](https://developer.chrome.com/docs/extensions/reference/api/identity).
 
 ## 7. Inbound-email processing
 
@@ -223,7 +225,7 @@ Add this boundary only in Milestone 3.
 
 Webhook/worker operations must be idempotent and order-independent. The web system—not the email worker—owns application matching decisions that mutate state and the event-confirmation workflow.
 
-Attachments should be ignored in the first email-ingestion slice unless a supported recruiting event cannot be extracted without them. Never treat attached resumes as permission to add document content to WIP.
+Attachments should be ignored in the first email-ingestion slice unless a supported recruiting event cannot be extracted without them. Never treat attached resumes as permission to add document content to Wip.
 
 ## 8. Aggregate analytics
 
@@ -233,7 +235,7 @@ Start inside PostgreSQL with schema-level isolation:
 - `analytics_private`: restricted de-identified contribution facts, no client grants; and
 - `analytics_public`: thresholded, versioned aggregate cells readable through the web API.
 
-A scheduled idempotent job reads only confirmed, consent-eligible event projections, derives bounded intervals/outcomes, removes direct identifiers/free text/exact times, and writes private facts. A second job groups facts and applies cohort/denominator/complementary suppression before releasing rows. Supabase Cron can schedule PostgreSQL functions or HTTP-triggered workers; Supabase Queues is a durable option if derivation later needs chunking. References: [Supabase Cron](https://supabase.com/docs/guides/cron) and [Supabase Queues](https://supabase.com/docs/guides/queues/quickstart).
+A scheduled idempotent job reads only confirmed, consent-eligible event projections, derives bounded intervals/outcomes, removes direct identifiers/free text/exact times, and writes private facts. A second job groups facts and applies cohort/denominator/complementary suppression before releasing rows. The Milestone 4 scheduler/queue is deliberately unselected; evaluate Neon scheduled-function options, Vercel Cron, or an isolated worker only when the aggregate design is approved.
 
 Keep metric definitions versioned. Initial candidates:
 
@@ -248,13 +250,24 @@ PostgreSQL is adequate for early batch aggregates. Move private facts to a dedic
 
 ## 9. Environments, deployment, and cost control
 
-### Milestone 1
+### Milestone 1A
 
-- Local: current Node LTS, pnpm, local Supabase, and `apps/web`.
-- Preview: Vercel preview deployment using an isolated non-production database or a deliberately read-only/synthetic preview dataset.
-- Production: one Vercel web deployment and one Supabase project/database. Set spend alerts and review function/database/storage usage monthly.
+- Local: current Node LTS, pnpm, `apps/web`, `packages/domain`, and deterministic fictional seed data.
+- No authentication provider, database, persistence, or production deployment was created in 1A.
+- The prototype remains compatible with the planned Vercel deployment model through a successful Next.js production build.
 
-### Later
+### Milestone 1B-1
+
+- Add one Neon development branch/database, Drizzle schema, checked-in SQL migrations, an idempotent fictional seed, and a Neon-backed read repository.
+- Use `DATABASE_URL` for the pooled serverless runtime connection and `DIRECT_DATABASE_URL` for drizzle-kit migrations. Use a separate disposable Neon branch or database URL for integration tests.
+- Keep the in-memory demo source available only through explicit configuration. In production mode it must fail closed unless a deliberate build/demo override is supplied; missing database credentials must not silently select demo data.
+- Do not deploy, configure authentication, expose mutations, or invite real-user data during this slice.
+
+### Milestone 1B-2 and later
+
+- Select and integrate authentication (Clerk is the leading candidate), map the provider subject to Wip owners, create a least-privilege runtime database role, and enforce/test PostgreSQL RLS before real-user beta use.
+- Add `/api/v1`, transactionally safe commands, export/deletion behavior, and isolated preview/production environments.
+- Production initially remains one Vercel web deployment and one Neon project/database, with separate branches or projects where isolation requires them. Set spend alerts and review function/database/storage usage monthly.
 
 - Milestone 2 adds Chrome Web Store packaging/signing and extension environment manifests.
 - Milestone 3 adds one Cloudflare worker, one private R2 bucket with lifecycle rules, and one queue/dead-letter queue.
@@ -281,11 +294,27 @@ Use structured logs with request/correlation ID, route/operation, deployment ver
 
 ## 11. Architecture gates
 
-Before Milestone 1 implementation:
+Before Milestone 1A implementation (resolved 2026-08-04):
 
-- approve Next.js/Vercel/Supabase and initial auth method;
-- approve semantic snapshot and stage vocabulary; and
-- decide whether the first internal demo requires Kanban.
+- use the confirmed Next.js/Vercel web stack;
+- use the confirmed semantic snapshot and stage vocabulary, including `assessment`;
+- use fictional seed data behind a replaceable boundary;
+- exclude authentication and backend integration; and
+- postpone Kanban until the end of Milestone 1.
+
+Milestone 1B-1 gate (resolved 2026-08-04):
+
+- use Neon PostgreSQL, Drizzle ORM/drizzle-kit, checked-in SQL migrations, pooled runtime and direct migration URLs;
+- implement only the read repository, normalized schema, idempotent seed, and integration-test foundation;
+- retain the explicit in-memory source for test/local demo use without a silent production fallback; and
+- retain metadata-only document handling through the initial beta.
+
+Before Milestone 1B-2:
+
+- confirm the auth provider and sign-in methods (Clerk is only the current candidate);
+- define auth-subject-to-owner mapping, least-privilege runtime role, RLS owner context, and cross-tenant tests;
+- choose a transaction-capable driver path for write commands; and
+- define the real API command boundary and deletion/export implementation.
 
 Before Milestone 2:
 
