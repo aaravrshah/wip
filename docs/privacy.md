@@ -15,7 +15,7 @@ Wip collects only what is needed for an enabled feature.
 
 ### Account and settings
 
-- sign-in identifier and authentication metadata managed by the auth provider;
+- Clerk's immutable account subject plus sign-in identifier and authentication metadata managed by Clerk;
 - timezone, locale, and minimal product preferences;
 - consent records and policy version; and
 - security/audit records necessary to protect the account.
@@ -47,11 +47,15 @@ An inbound-email vendor cannot be launched unless its own retention and deletion
 
 Wip may collect minimal security and reliability data such as request time, route, coarse device/browser class, error code, deployment version, and randomized session identifier. Logs must not contain snapshot text, notes, contact details, document names, raw emails, access tokens, full source URLs with query strings, or event payloads. Product analytics, if added, needs a separate disclosure and must not imply consent to Hiring Pulse contribution.
 
-### PostgreSQL persistence boundary
+### Authentication and PostgreSQL persistence boundary
 
-Neon PostgreSQL is the operational system of record selected for Milestone 1B-1. The database receives only the tracker fields listed above; choosing Neon does not expand collection. Database connection strings are server-only secrets and must never be exposed to browser JavaScript, extension code, public environment variables, logs, fixtures, or screenshots.
+Clerk is the web authentication provider selected in Milestone 1B-2. Initial methods are Google and passwordless email verification links. Clerk necessarily processes the account identifier, authentication factors/provider metadata, session/device/security information, and delivery events needed for those methods. Wip stores only Clerk's immutable subject on the internal owner record; it does not copy a Google access token into the tracker database or request additional Google scopes beyond authentication. Provider retention, subprocessors, regions, security controls, and account-deletion behavior require review before external beta.
 
-Milestone 1B-1 contains fictional demo data only and scopes every read by an explicit internal owner identifier. This application-layer scope is a foundation, not a claim of production tenant isolation. Before real-user data, Milestone 1B-2 must add authenticated owner mapping, a least-privilege runtime database role, enforced PostgreSQL RLS, cross-owner security tests, and documented Neon backup/branch deletion behavior. Database integration tests must use a disposable branch or database containing fictional data only.
+Neon PostgreSQL is the operational system of record. The database receives only the tracker fields listed above plus the Clerk subject-to-internal-owner mapping; choosing Neon/Clerk does not expand tracker collection. Database connection strings and Clerk secret keys are server-only and must never be exposed to browser JavaScript, extension code, public environment variables, logs, fixtures, or screenshots. The Clerk publishable key is intentionally public but conveys no database privilege.
+
+Milestone 1B-2 maps a verified Clerk subject to an internal UUID, passes a short-lived Clerk JWT server-side to Neon, and enforces enabled/forced RLS using Neon's verified `auth.user_id()`. The normal passwordless database role has read-only table grants and cannot bypass RLS. Privileged seed/migration URLs are not used for authenticated requests. Missing or invalid authentication fails closed; an authenticated owner cannot see the fictional seed or another owner's rows even if an internal UUID is guessed.
+
+The product is still read-only and not deployed in this milestone. Database/auth integration tests must use a disposable branch and fictional test identities only. Before external beta, document Neon backup/branch deletion behavior, Clerk deletion/session retention, production Google OAuth configuration, and both vendors' privacy/subprocessor terms.
 
 ## 3. Data Wip does not collect
 
@@ -134,6 +138,8 @@ Every aggregate surface must display a plain-language caveat about opt-in select
 ## 6. Access and permissions
 
 - Users can access only their own tracker data. Database row-level security and application authorization both enforce this boundary.
+- Clerk determines whether a request has a valid user session; it does not decide which tracker rows are visible. Neon verifies Clerk's JWT against its configured JWKS/audience, and PostgreSQL policies authorize the mapped internal owner.
+- New authenticated owners start empty. The twelve fictional demo records are never copied into a new account and have no Clerk identity mapping.
 - Support access is deny-by-default, time-limited, audited, and used only with the user's authorization or for documented security/legal necessity.
 - The extension uses temporary `activeTab` access after a user gesture and a narrow Wip API origin. It does not request `<all_urls>`, cookies, browsing history, or network interception.
 - Email workers, extractors, and analytics jobs use separate credentials with access only to their required queue, storage prefix, schema, or endpoint.

@@ -1,6 +1,6 @@
 # Wip event-first data model
 
-Status: implemented foundation plus later-model requirements
+Status: implemented read-only authenticated foundation plus later-model requirements
 Last updated: 2026-08-04  
 Database assumption: PostgreSQL
 
@@ -10,7 +10,7 @@ The model must answer both “what is the current state?” and “what happened
 
 Core invariants:
 
-1. Every user-owned row has an explicit non-null `owner_id` ownership path. Same-owner composite foreign keys and owner-scoped repository predicates are required in Milestone 1B-1; authenticated RLS enforcement is added in Milestone 1B-2 before real-user data.
+1. Every user-owned row has an explicit non-null `owner_id` ownership path. Same-owner composite foreign keys and owner-scoped repository predicates provide integrity/defense in depth. Milestone 1B-2 enables and forces authenticated RLS on every identity/owned table.
 2. Job-description snapshots are immutable. A recapture inserts a new row.
 3. Application-event facts are append-oriented. Corrections supersede earlier events rather than editing their occurrence details.
 4. Event occurrence time and record creation time are different fields.
@@ -39,7 +39,7 @@ erDiagram
     OWNER ||--o{ AGGREGATION_CONSENT : decides
 ```
 
-The authentication provider will own credentials and sessions. `owners` is the provider-neutral Wip tenant root. Milestone 1B-2 maps a provider's immutable subject to an owner and adds strict RLS policies; provider subjects must not be used as free-form ownership keys throughout the product schema.
+Clerk owns credentials and web sessions. `owners` remains the provider-neutral Wip tenant root. A Neon-verified Clerk subject maps uniquely and idempotently to one internal owner UUID; provider subjects are not free-form ownership keys throughout the product schema.
 
 ## 3. Core entities
 
@@ -50,8 +50,8 @@ Minimal user settings; not a demographic profile.
 | Field | Type | Meaning / constraint |
 | --- | --- | --- |
 | `id` | `uuid` PK | Internal Wip owner identifier. |
-| `auth_provider` | `text` nullable | Reserved for the provider selected in Milestone 1B-2. |
-| `auth_subject` | `text` nullable | Provider's immutable subject; unique with provider when present. |
+| `auth_provider` | `text` nullable | `clerk` for authenticated owners; null for the isolated fictional seed owner. |
+| `auth_subject` | `text` nullable | Clerk's immutable `sub`; unique with provider and independently unique for Clerk when present. |
 | `timezone` | `text` | IANA timezone, required after onboarding. |
 | `locale` | `text` | Optional presentation locale. |
 | `week_starts_on` | `smallint` | Optional UI preference. |
@@ -59,6 +59,8 @@ Minimal user settings; not a demographic profile.
 | `updated_at` | `timestamptz` | Database-generated on mutation. |
 
 Do not add birthdate, graduation year, race/ethnicity, gender, disability, veteran status, Social Security number, or EEO-response fields. If broad career-stage segmentation is later needed for aggregates, it requires a separate privacy decision and must not be inferred from age or graduation date.
+
+Authenticated web code cannot choose these fields. On first verified access it invokes `wip_provision_owner()` without arguments. The function reads `auth.user_id()` from Neon's verified JWT context, inserts `auth_provider = 'clerk'`/that subject if absent, and returns the stable internal UUID. A retry or concurrent request returns the same owner. Missing/invalid JWT context raises an authorization error rather than creating a row.
 
 ### `applications`
 
@@ -310,20 +312,23 @@ The transient object is deleted immediately after a successful extraction propos
 
 ## 8. Authorization, indexing, and integrity
 
-- Milestone 1B-1 puts `owner_id` on every owned relation, uses composite `(owner_id, id)` parent keys for same-owner foreign keys, and scopes every repository query. It does not claim authenticated database isolation because authentication is not yet present.
-- Milestone 1B-2 must enable and force RLS on every exposed table, create a least-privilege non-owner runtime role, derive the owner context from the authenticated server request, and test cross-owner reads, writes, and joins. Neon database owner credentials are migration-only, never a normal browser/request credential.
+- Milestone 1B-1 put `owner_id` on every owned relation, used composite `(owner_id, id)` parent keys for same-owner foreign keys, and scoped repository queries.
+- Milestone 1B-2 enables and forces RLS on `owners` and all ten `owner_id` tables. `owners` is visible only when its Clerk subject matches `auth.user_id()`; child policies allow SELECT only when `owner_id = wip_current_owner_id()`.
+- The passwordless `authenticated` role is `NOBYPASSRLS`, has no table write grants, and receives SELECT only on the current eleven tables plus EXECUTE on `wip_current_owner_id()` and zero-argument `wip_provision_owner()`. The latter is the only current database write path.
+- Clerk authenticates sessions and issues a short-lived custom JWT. Neon verifies the JWT via configured JWKS/audience and exposes its subject. The Next.js repository never accepts an arbitrary owner ID and never sets `request.jwt.claims` or another caller-controlled identity setting.
+- `DATABASE_URL` is privileged fictional-seed tooling, `DIRECT_DATABASE_URL` is privileged migration tooling, and `NEON_AUTHENTICATED_DATABASE_URL` is normal request-time read access. Owner/migration credentials are never a browser/request credential.
 - Add indexes for active application lists, event timelines, due actions, pending confirmations, snapshot versions, document uses, and consent lookup.
 - Use database triggers or transactional command handlers to reject cross-user references, snapshot updates, invalid confirmation transitions, and direct projection writes.
 - Enforce unique idempotency keys within the relevant source/owner scope.
 - Make seed data entirely fictional and associate it only with development/test identities.
 
-### Milestone 1B-1 physical schema
+### Milestone 1B-2 physical schema and access layer
 
 The checked-in Drizzle schema and SQL migrations implement eleven tables: `owners`, `applications`, `application_events`, `job_description_snapshots`, `documents`, `document_versions`, `application_document_uses`, `contacts`, `application_contacts`, `notes`, and `next_actions`. Application routes use owner-scoped `public_id` values while internal and relationship identifiers are UUIDs. PostgreSQL enums constrain stages and other small taxonomies; common owner/list/timeline/action paths are indexed.
 
-Database triggers reject `UPDATE` on events, job-description snapshots, and document versions. Every owned table has `owner_id`, and every child relationship uses a composite owner/reference foreign key where applicable. The seed's owner and row IDs are deterministic so repeated runs are idempotent.
+Database triggers reject `UPDATE` on events, job-description snapshots, and document versions. Every owned table has `owner_id`, and every child relationship uses a composite owner/reference foreign key where applicable. The seed's owner and row IDs are deterministic so repeated runs are idempotent; because the seed owner has no auth identity, authenticated policies cannot select it.
 
-`event_confirmation_decisions`, aggregation consent, inbox processing, analytics schemas, auth-backed RLS policies, and write-side projection transactions remain conceptual parts of the later model and are deliberately absent from the 1B-1 migration.
+After Neon RLS provisioning supplies the JWT helper and `authenticated` role, migration `0002_clerk_auth_rls.sql` verifies that the role exists without `BYPASSRLS`, defines Wip's functions/policies/grants, creates the Clerk-subject uniqueness constraint, and forces RLS. `event_confirmation_decisions`, aggregation consent, inbox processing, analytics schemas, and write-side projection transactions remain conceptual later work and are deliberately absent.
 
 ## 9. Deletion and export implications
 

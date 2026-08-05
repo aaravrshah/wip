@@ -15,6 +15,13 @@
       "when": 1785895521023,
       "tag": "0001_immutable_records",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785899718543,
+      "tag": "0002_clerk_auth_rls",
+      "breakpoints": true
     }
   ]
 }

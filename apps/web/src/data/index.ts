@@ -1,35 +1,35 @@
-import { createNeonApplicationRepository } from './neon-application-repository';
-import type { ApplicationRepository } from './application-repository';
-import { demoApplicationRepository } from './demo-application-repository';
+import { requireAuthenticatedDatabaseIdentity } from '@/auth/server';
 import { getServerEnvironment } from '@/env/server';
 
-let cachedRepository: ApplicationRepository | undefined;
+import { createAuthenticatedNeonApplicationRepository } from './neon-application-repository';
+import type { ApplicationRepository } from './application-repository';
+import { demoApplicationRepository } from './demo-application-repository';
 
-function getRepository(): ApplicationRepository {
-  if (cachedRepository) return cachedRepository;
-
+async function getRepository(): Promise<ApplicationRepository> {
   const environment = getServerEnvironment();
-  cachedRepository =
-    environment.dataSource === 'neon'
-      ? createNeonApplicationRepository({
-          databaseUrl: environment.databaseUrl,
-          ownerId: environment.ownerId,
-        })
-      : demoApplicationRepository;
+  if (environment.dataSource === 'demo') return demoApplicationRepository;
 
-  return cachedRepository;
+  const identity = await requireAuthenticatedDatabaseIdentity();
+  return createAuthenticatedNeonApplicationRepository({
+    authenticatedDatabaseUrl: environment.authenticatedDatabaseUrl,
+    databaseToken: identity.databaseToken,
+  });
 }
 
-// Selection is explicit. Development/test default to the deterministic in-memory source;
-// production rejects that source unless its separate demo-build override is deliberate.
+// Demo selection is explicit and cannot silently activate in production. Authenticated
+// repositories are intentionally request-local so a Clerk JWT or owner scope is never cached
+// across users in a long-lived Next.js process.
 export const applicationRepository: ApplicationRepository = {
-  listApplications() {
-    return getRepository().listApplications();
+  async listApplications() {
+    return (await getRepository()).listApplications();
   },
-  getApplicationById(id) {
-    return getRepository().getApplicationById(id);
+  async getApplicationById(id) {
+    return (await getRepository()).getApplicationById(id);
   },
   getReferenceDate() {
-    return getRepository().getReferenceDate();
+    const environment = getServerEnvironment();
+    return environment.dataSource === 'demo'
+      ? demoApplicationRepository.getReferenceDate()
+      : new Date();
   },
 };

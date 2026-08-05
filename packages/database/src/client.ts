@@ -8,4 +8,9 @@ export function createDatabase(connectionString: string) {
   return drizzle({ client, schema });
 }
 
+export function createAuthenticatedDatabase(connectionString: string, authToken: string) {
+  const client = neon(connectionString, { authToken });
+  return drizzle({ client, schema });
+}
+
 export type WipDatabase = ReturnType<typeof createDatabase>;

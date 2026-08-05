@@ -35,8 +35,12 @@ Last updated: 2026-08-04
 | C-020 | **Superseded by C-023.** Initial authentication was planned as email magic links, with Google authentication postponed until before the external beta. | Authentication is now a separate decision for Milestone 1B-2; the product must not build against the former Supabase Auth assumption. |
 | C-021 | Milestone 1A is a runnable front-end vertical prototype backed only by fictional in-repository seed data and a replaceable data-access boundary. | Authentication, persistent storage, extension work, email ingestion, and Hiring Pulse aggregation were explicitly excluded from 1A and remain later work. |
 | C-022 | Use Neon PostgreSQL for the production database, Drizzle ORM for typed server-side queries, drizzle-kit for checked-in SQL migrations, and Neon's current serverless TypeScript driver in the Next.js runtime. Keep Next.js on Vercel. | Neon free-plan computes automatically suspend when idle and wake on a query without manual project restoration. Runtime requests use a pooled connection; migrations use a separate direct connection. Database credentials remain server-only. This supersedes the database portion of C-017 and P-004. |
-| C-023 | Authentication is postponed to Milestone 1B-2 and will be integrated separately from the database. Clerk is the leading candidate, but the provider and launch sign-in methods are not yet confirmed. | Milestone 1B-1 must remain read-only and use an explicit owner identifier at the repository boundary. Do not implement Clerk, magic links, Google OAuth, or browser sessions in 1B-1. This supersedes C-020. |
+| C-023 | **Superseded by C-025 through C-028.** Authentication was postponed to Milestone 1B-2 with Clerk as the leading candidate. | Preserved as the 1B-1 scope decision; the provider, methods, owner mapping, and authorization path are now confirmed. |
 | C-024 | Milestone 1B-1 adds only the persistence foundation: normalized event-first tables, checked-in migrations, an idempotent fictional seed, a Neon-backed read repository, environment validation, and integration coverage. | Application mutations, RLS policies tied to authenticated identity, production auth, extension work, email ingestion, file storage, analytics, and deployment are deliberately postponed. The in-memory repository remains an explicit local/test fallback and may not activate silently in production. |
+| C-025 | Use Clerk for web authentication with Google and passwordless email verification links as the initial methods. | Clerk's prebuilt Next.js UI supplies sign-in, sign-up, account management, and sign-out. Email verification remains required. Production Google OAuth credentials and provider/privacy review are still required before external beta. This resolves O-002 and supersedes C-020/C-023. |
+| C-026 | Keep Wip's internal UUID `owners.id` separate from Clerk's immutable subject. Provision the mapping idempotently from a verified database JWT through a zero-argument database function; never accept the subject or owner UUID from browser input. | The `owners` row records `auth_provider = 'clerk'` and a uniquely constrained `auth_subject`. New authenticated owners start empty and never inherit fictional seed records. Provider identifiers do not spread through every product table. |
+| C-027 | Use Clerk custom JWTs with Neon's supported JWKS/RLS integration. The Next.js server passes the JWT with Neon's HTTP driver to a passwordless `authenticated` role; PostgreSQL derives identity with `auth.user_id()`. | Neon verifies signature, issuer/expiry, and configured audience before queries. All 11 identity/owned tables enable and force RLS. The runtime role is `NOBYPASSRLS`, has read-only table grants, and can execute only the tightly scoped owner-provision function. No caller-set `request.jwt.claims` or pooled session variables are permitted. |
+| C-028 | Milestone 1B-2 is the read-only authentication and tenant-isolation slice. It includes signed-out UX, authenticated owner provisioning, Neon RLS, and security coverage, but not application mutations or a general API layer. | The `ApplicationRepository` remains the UI boundary; authenticated requests cannot choose arbitrary owners. The explicit in-memory demo remains for local/test use and cannot silently activate in production. CRUD, commands, export/deletion implementation, Kanban, deployment, and later product systems move to 1B-3 or their existing milestones. |
 
 ## Proposed decisions requiring approval
 
@@ -62,7 +66,7 @@ Last updated: 2026-08-04
 | ID | Question | Recommended default / decision deadline |
 | --- | --- | --- |
 | O-001 | What is the legally cleared final name, domain, and visual identity? | Partially resolved by C-013: use “Wip” as the working name and simple text wordmark. Legal clearance/domain/final identity remain open before public beta. |
-| O-002 | Which authentication provider and sign-in methods launch first? | Reopened by C-023. Clerk is the leading provider candidate for Milestone 1B-2; decide supported sign-in methods and extension token exchange before implementation. |
+| O-002 | Which authentication provider and sign-in methods launch first? | Resolved by C-025 for the web app: Clerk with Google and passwordless email links. Extension token exchange remains O-009. |
 | O-003 | Does “exact snapshot” require pixel-perfect screenshot/PDF/full DOM in addition to semantic content? | Resolved for the initial product by C-014: no; screenshots/full-page archives are postponed. |
 | O-004 | Are the proposed stage names and Kanban terminal-column behavior right? | Stage vocabulary resolved by C-015. Detailed future Kanban terminal-column behavior remains open until the end-of-Milestone-1 Kanban slice. |
 | O-005 | Is Kanban mandatory for the first internal demo or acceptable at the end of Milestone 1? | Resolved by C-019: postpone it until the end of Milestone 1; it is excluded from Milestone 1A. |
@@ -95,12 +99,13 @@ Each published metric needs a versioned name, numerator, denominator, inclusion/
 
 ## Current implementation authorization
 
-Milestone 1B-1 is authorized by C-022 through C-024 with these limits:
+Milestone 1B-2 is authorized by C-025 through C-028 with these limits:
 
-1. preserve the Milestone 1A read-only UI and its in-memory repository;
-2. add Neon PostgreSQL, Drizzle schemas, checked-in SQL migrations, and an idempotent fictional seed;
-3. add a server-only Neon repository selected explicitly through validated environment variables;
-4. keep every owned relation owner-scoped and add database tests for cross-owner query isolation; and
-5. exclude authentication, application mutations, RLS identity policies, Kanban, extension work, email ingestion, Hiring Pulse, file uploads, and deployment.
+1. preserve the read-only Milestone 1A UI and repository contract;
+2. add Clerk authentication, signed-out/authentication/account UX, and verified-session checks at each protected data boundary;
+3. provision internal owners only from Neon-verified Clerk JWT context;
+4. enable and force RLS for every identity/owner-scoped table, grant the runtime role read-only access plus the narrow provisioning function, and test fail-closed/cross-user behavior;
+5. keep fictional demo/seed data isolated from authenticated owners; and
+6. exclude application mutations, general `/api/v1` commands, Kanban, extension work, email ingestion, Hiring Pulse, file uploads, billing, deployment, and real-user beta admission.
 
-Milestone 1B-2 and Milestones 2–4 remain outside the current implementation authorization.
+Milestone 1B-3 and Milestones 2–4 remain outside the current implementation authorization.

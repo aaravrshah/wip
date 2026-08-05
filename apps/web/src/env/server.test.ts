@@ -28,23 +28,38 @@ describe('server environment selection', () => {
   test('requires server database configuration when Neon is selected', () => {
     expect(() =>
       parseServerEnvironment({ NODE_ENV: 'development', WIP_DATA_SOURCE: 'neon' }),
-    ).toThrow(/requires server-only database_url and wip_owner_id/i);
+    ).toThrow(/requires neon_authenticated_database_url and the clerk/i);
   });
 
-  test('returns validated Neon settings', () => {
+  test('requires the passwordless authenticated Neon role', () => {
+    expect(() =>
+      parseServerEnvironment({
+        NODE_ENV: 'development',
+        WIP_DATA_SOURCE: 'neon',
+        NEON_AUTHENTICATED_DATABASE_URL:
+          'postgresql://owner:password@example-pooler.invalid/placeholder?sslmode=require',
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_placeholder',
+        CLERK_SECRET_KEY: 'sk_test_placeholder',
+      }),
+    ).toThrow(/authenticated database role/i);
+  });
+
+  test('returns validated authenticated Neon settings without an owner override', () => {
     expect(
       parseServerEnvironment({
         NODE_ENV: 'development',
         WIP_DATA_SOURCE: 'neon',
-        DATABASE_URL:
-          'postgresql://placeholder:placeholder@example-pooler.invalid/placeholder?sslmode=require',
-        WIP_OWNER_ID: '00000000-0000-5000-8000-000000000001',
+        NEON_AUTHENTICATED_DATABASE_URL:
+          'postgresql://authenticated@example-pooler.invalid/placeholder?sslmode=require',
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_placeholder',
+        CLERK_SECRET_KEY: 'sk_test_placeholder',
+        CLERK_JWT_TEMPLATE: 'wip-neon',
       }),
     ).toEqual({
       dataSource: 'neon',
-      databaseUrl:
-        'postgresql://placeholder:placeholder@example-pooler.invalid/placeholder?sslmode=require',
-      ownerId: '00000000-0000-5000-8000-000000000001',
+      authenticatedDatabaseUrl:
+        'postgresql://authenticated@example-pooler.invalid/placeholder?sslmode=require',
+      clerkJwtTemplate: 'wip-neon',
     });
   });
 });

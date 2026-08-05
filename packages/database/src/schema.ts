@@ -6,6 +6,8 @@ import {
   jsonb,
   numeric,
   pgEnum,
+  pgPolicy,
+  pgRole,
   pgTable,
   smallint,
   text,
@@ -14,6 +16,7 @@ import {
   uniqueIndex,
   uuid,
 } from 'drizzle-orm/pg-core';
+import type { AnyPgColumn } from 'drizzle-orm/pg-core';
 
 export const applicationStageEnum = pgEnum('application_stage', [
   'saved',
@@ -82,6 +85,15 @@ export const nextActionStateEnum = pgEnum('next_action_state', ['open', 'complet
 
 const utcTimestamp = (name: string) => timestamp(name, { mode: 'date', withTimezone: true });
 
+export const authenticatedRole = pgRole('authenticated').existing();
+
+const ownerReadPolicy = (name: string, ownerId: AnyPgColumn) =>
+  pgPolicy(name, {
+    for: 'select',
+    to: authenticatedRole,
+    using: sql`${ownerId} = (select public.wip_current_owner_id())`,
+  });
+
 export const owners = pgTable(
   'owners',
   {
@@ -98,12 +110,20 @@ export const owners = pgTable(
     uniqueIndex('owners_auth_identity_unique')
       .on(table.authProvider, table.authSubject)
       .where(sql`${table.authProvider} is not null and ${table.authSubject} is not null`),
+    uniqueIndex('owners_clerk_subject_unique')
+      .on(table.authSubject)
+      .where(sql`${table.authProvider} = 'clerk'`),
     check(
       'owners_week_starts_on_check',
       sql`${table.weekStartsOn} is null or ${table.weekStartsOn} between 0 and 6`,
     ),
+    pgPolicy('owners_clerk_identity_select', {
+      for: 'select',
+      to: authenticatedRole,
+      using: sql`${table.authProvider} = 'clerk' and ${table.authSubject} = (select auth.user_id())`,
+    }),
   ],
-);
+).enableRLS();
 
 export const applications = pgTable(
   'applications',
@@ -137,8 +157,9 @@ export const applications = pgTable(
       table.updatedAt,
     ),
     index('applications_owner_last_event_idx').on(table.ownerId, table.lastConfirmedEventAt),
+    ownerReadPolicy('applications_owner_select', table.ownerId),
   ],
-);
+).enableRLS();
 
 export const applicationEvents = pgTable(
   'application_events',
@@ -193,8 +214,9 @@ export const applicationEvents = pgTable(
       sql`${table.confidence} is null or ${table.confidence} between 0 and 1`,
     ),
     check('application_events_payload_version_check', sql`${table.payloadVersion} > 0`),
+    ownerReadPolicy('application_events_owner_select', table.ownerId),
   ],
-);
+).enableRLS();
 
 export const jobDescriptionSnapshots = pgTable(
   'job_description_snapshots',
@@ -241,8 +263,9 @@ export const jobDescriptionSnapshots = pgTable(
       'job_snapshots_sha256_check',
       sql`char_length(${table.contentSha256}) = 64 and ${table.contentSha256} ~ '^[0-9a-f]{64}$'`,
     ),
+    ownerReadPolicy('job_description_snapshots_owner_select', table.ownerId),
   ],
-);
+).enableRLS();
 
 export const documents = pgTable(
   'documents',
@@ -259,8 +282,9 @@ export const documents = pgTable(
   (table) => [
     unique('documents_owner_id_id_unique').on(table.ownerId, table.id),
     index('documents_owner_kind_idx').on(table.ownerId, table.kind),
+    ownerReadPolicy('documents_owner_select', table.ownerId),
   ],
-);
+).enableRLS();
 
 export const documentVersions = pgTable(
   'document_versions',
@@ -297,8 +321,9 @@ export const documentVersions = pgTable(
       'document_versions_sha256_check',
       sql`${table.contentSha256} is null or (char_length(${table.contentSha256}) = 64 and ${table.contentSha256} ~ '^[0-9a-f]{64}$')`,
     ),
+    ownerReadPolicy('document_versions_owner_select', table.ownerId),
   ],
-);
+).enableRLS();
 
 export const applicationDocumentUses = pgTable(
   'application_document_uses',
@@ -332,8 +357,9 @@ export const applicationDocumentUses = pgTable(
       table.purpose,
     ),
     index('application_document_uses_owner_application_idx').on(table.ownerId, table.applicationId),
+    ownerReadPolicy('application_document_uses_owner_select', table.ownerId),
   ],
-);
+).enableRLS();
 
 export const contacts = pgTable(
   'contacts',
@@ -351,8 +377,9 @@ export const contacts = pgTable(
   (table) => [
     unique('contacts_owner_id_id_unique').on(table.ownerId, table.id),
     index('contacts_owner_name_idx').on(table.ownerId, table.displayName),
+    ownerReadPolicy('contacts_owner_select', table.ownerId),
   ],
-);
+).enableRLS();
 
 export const applicationContacts = pgTable(
   'application_contacts',
@@ -380,8 +407,9 @@ export const applicationContacts = pgTable(
     }).onDelete('cascade'),
     unique('application_contacts_unique').on(table.ownerId, table.applicationId, table.contactId),
     index('application_contacts_owner_application_idx').on(table.ownerId, table.applicationId),
+    ownerReadPolicy('application_contacts_owner_select', table.ownerId),
   ],
-);
+).enableRLS();
 
 export const notes = pgTable(
   'notes',
@@ -407,8 +435,9 @@ export const notes = pgTable(
       table.applicationId,
       table.createdAt,
     ),
+    ownerReadPolicy('notes_owner_select', table.ownerId),
   ],
-);
+).enableRLS();
 
 export const nextActions = pgTable(
   'next_actions',
@@ -440,8 +469,9 @@ export const nextActions = pgTable(
       'next_actions_completion_check',
       sql`(${table.state} = 'completed' and ${table.completedAt} is not null) or (${table.state} <> 'completed')`,
     ),
+    ownerReadPolicy('next_actions_owner_select', table.ownerId),
   ],
-);
+).enableRLS();
 
 export const ownedTables = {
   applicationContacts,

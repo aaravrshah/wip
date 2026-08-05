@@ -6,18 +6,27 @@ const baseEnvironmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   WIP_DATA_SOURCE: z.enum(['demo', 'neon']).optional(),
   WIP_ALLOW_PRODUCTION_DEMO: z.enum(['true', 'false']).optional().default('false'),
-  WIP_OWNER_ID: z.uuid().optional(),
-  DATABASE_URL: z
+  NEON_AUTHENTICATED_DATABASE_URL: z
     .url()
     .startsWith('postgresql://')
+    .refine((value) => new URL(value).username === 'authenticated', {
+      message: 'NEON_AUTHENTICATED_DATABASE_URL must use the authenticated database role.',
+    })
+    .refine((value) => new URL(value).password === '', {
+      message: 'NEON_AUTHENTICATED_DATABASE_URL must be passwordless.',
+    })
     .refine((value) => new URL(value).hostname.includes('-pooler'), {
-      message: 'DATABASE_URL must use the pooled Neon hostname.',
+      message: 'NEON_AUTHENTICATED_DATABASE_URL must use the pooled Neon hostname.',
     })
     .optional(),
+  NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: z.string().startsWith('pk_').optional(),
+  CLERK_SECRET_KEY: z.string().startsWith('sk_').optional(),
+  CLERK_JWT_TEMPLATE: z.string().trim().min(1).default('neon'),
 });
 
 export type ServerEnvironment =
-  { dataSource: 'demo' } | { dataSource: 'neon'; databaseUrl: string; ownerId: string };
+  | { dataSource: 'demo' }
+  | { dataSource: 'neon'; authenticatedDatabaseUrl: string; clerkJwtTemplate: string };
 
 let cachedEnvironment: ServerEnvironment | undefined;
 
@@ -37,16 +46,20 @@ export function parseServerEnvironment(
     return { dataSource: 'demo' };
   }
 
-  if (!environment.DATABASE_URL || !environment.WIP_OWNER_ID) {
+  if (
+    !environment.NEON_AUTHENTICATED_DATABASE_URL ||
+    !environment.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+    !environment.CLERK_SECRET_KEY
+  ) {
     throw new Error(
-      'WIP_DATA_SOURCE=neon requires server-only DATABASE_URL and WIP_OWNER_ID values.',
+      'WIP_DATA_SOURCE=neon requires NEON_AUTHENTICATED_DATABASE_URL and the Clerk publishable and secret keys.',
     );
   }
 
   return {
     dataSource: 'neon',
-    databaseUrl: environment.DATABASE_URL,
-    ownerId: environment.WIP_OWNER_ID,
+    authenticatedDatabaseUrl: environment.NEON_AUTHENTICATED_DATABASE_URL,
+    clerkJwtTemplate: environment.CLERK_JWT_TEMPLATE,
   };
 }
 

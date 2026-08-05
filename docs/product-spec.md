@@ -127,11 +127,11 @@ On mobile, these sections appear as a single readable column with timeline, next
 
 ## 4. MVP scope
 
-For planning purposes, the launch MVP spans Milestones 1 and 2: a manually useful web tracker plus intentional current-tab capture. Milestone 1 must be independently useful without the extension. Milestone 1A is a front-end-only vertical prototype using fictional seed data. Milestone 1B-1 introduces the read-only Neon PostgreSQL persistence foundation; Milestone 1B-2 adds separately selected authentication, user mutations, RLS, and production API integration.
+For planning purposes, the launch MVP spans Milestones 1 and 2: a manually useful web tracker plus intentional current-tab capture. Milestone 1 must be independently useful without the extension. Milestone 1A is a front-end-only vertical prototype using fictional seed data. Milestone 1B-1 introduces the read-only Neon PostgreSQL persistence foundation; Milestone 1B-2 adds Clerk authentication, empty authenticated owners, and strict Neon/PostgreSQL RLS while remaining read-only; Milestone 1B-3 adds manual mutations and production API commands.
 
 ### Included in the MVP
 
-- Account sign-in and strict per-user data isolation in Milestone 1B-2. Clerk is the leading provider candidate, but launch sign-in methods remain unresolved until that slice.
+- Account sign-in with Clerk Google/passwordless email links and strict per-user data isolation in Milestone 1B-2.
 - Manual application create, edit, archive, and delete.
 - Manual immutable job-description snapshots, followed by extension capture in Milestone 2.
 - Manual chronological events and derived current stage.

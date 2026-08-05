@@ -1,6 +1,6 @@
 # Wip recommended architecture
 
-Status: accepted through Milestone 1B-1
+Status: accepted through Milestone 1B-2
 Last updated: 2026-08-04  
 Decision horizon: optimize Milestones 1–2; preserve clean boundaries for Milestones 3–4
 
@@ -8,12 +8,12 @@ Decision horizon: optimize Milestones 1–2; preserve clean boundaries for Miles
 
 Use a TypeScript monorepo with four explicit product boundaries, but deploy only what the current milestone needs:
 
-1. **Web system of record:** Next.js App Router on Vercel, backed by Neon PostgreSQL. Authentication is a separate Milestone 1B-2 integration; Clerk is the leading candidate, not a confirmed selection.
+1. **Web system of record:** Next.js App Router on Vercel, backed by Neon PostgreSQL, with Clerk authentication and Neon-verified Clerk JWTs enforcing PostgreSQL RLS.
 2. **Extension capture layer:** Chrome Manifest V3 extension built with WXT, using a popup and user-invoked `activeTab` extraction.
 3. **Inbound-email processing:** a separate Cloudflare Email Worker, private R2 transient storage, and queue consumer added in Milestone 3.
 4. **Aggregate analytics:** isolated Postgres schemas and scheduled derivation jobs added in Milestone 4; move to a warehouse only when scale or query isolation justifies it.
 
-Use pnpm workspaces for dependency management and Turborepo for dependency-aware tasks/cache. Keep shared domain contracts, validation, database access, API client, and UI primitives in packages once each boundary provides clear value. Milestone 1B-1 adds `packages/database` for Drizzle schema, migrations, and seed logic while the application-facing repository contract remains in the web app. Do not create authentication, extension, email, or analytics deployment scaffolding during Milestone 1B-1.
+Use pnpm workspaces for dependency management and Turborepo for dependency-aware tasks/cache. Keep shared domain contracts, validation, database access, API client, and UI primitives in packages once each boundary provides clear value. `packages/database` owns Drizzle schema, migrations, Neon clients, and seed logic; Clerk/session integration and the application-facing repository contract stay in `apps/web`. Milestone 1B-2 adds no extension, email, analytics, mutation, or deployment scaffolding.
 
 The recommendation favors a solo developer's delivery speed, managed free/low-cost starting tiers, portable PostgreSQL data, and the ability to split heavy workers later. Pricing changes frequently; verify current plan terms before provisioning rather than encoding numeric cost promises here.
 
@@ -26,7 +26,8 @@ flowchart LR
     WebUI --> WebAPI["Next.js web/API\nsystem of record"]
     Extension -->|"reviewed snapshot over /api/v1"| WebAPI
     WebAPI --> DB["Neon PostgreSQL\nsystem of record"]
-    Auth["Auth provider\nMilestone 1B-2"] -.-> WebAPI
+    Auth["Clerk\nGoogle + email links"] -->|"verified session + custom JWT"| WebAPI
+    Auth -->|"JWKS"| DB
 
     Mail["Forwarded recruiting email"] --> EmailWorker["Email routing Worker\nverify recipient + store transiently"]
     EmailWorker --> Raw["Private R2\nshort TTL"]
@@ -68,7 +69,7 @@ wip/
 └── turbo.json
 ```
 
-Milestone 1B-1 adds only `packages/database` and the smallest fixture package needed to share the twelve fictional applications between the in-memory adapter and database seed. The remaining shown directories describe later target boundaries, not required empty scaffolds. Do not add `apps/extension` until Milestone 2 or `apps/email-ingest` until Milestone 3. Aggregate derivation can begin as migrations/database functions plus scheduled jobs; add a separate `apps/analytics-worker` only if the work cannot safely fit a short idempotent database or server job.
+Milestone 1B-2 keeps the existing packages and adds Clerk/session code only inside `apps/web`; authentication is not a cross-runtime shared package yet. The remaining shown directories describe later target boundaries, not required empty scaffolds. Do not add `apps/extension` until Milestone 2 or `apps/email-ingest` until Milestone 3. Aggregate derivation can begin as migrations/database functions plus scheduled jobs; add a separate `apps/analytics-worker` only if the work cannot safely fit a short idempotent database or server job.
 
 ## 4. Current options considered
 
@@ -88,11 +89,11 @@ Official references: [Next.js App Router](https://nextjs.org/docs/app), [Next.js
 
 | Option | Advantages | Costs / risks | Decision |
 | --- | --- | --- | --- |
-| Neon Postgres + separate auth | Serverless PostgreSQL, pooled runtime connections, direct migration connections, branching, and a database lifecycle that automatically wakes idle free computes on demand. It keeps auth replaceable. | A separate auth vendor must later be integrated with PostgreSQL authorization and RLS; the runtime role and session/transaction owner context need explicit design. | **Selected by C-022.** Use Drizzle ORM and Neon's serverless driver server-side. Authentication follows separately in Milestone 1B-2. |
+| Neon Postgres + Clerk | Serverless PostgreSQL, branching, auto-waking idle computes, managed Google/email authentication, and Neon-supported JWT/JWKS RLS. | Two vendors must be configured consistently; custom JWT, audience, database grants, and RLS policies require live integration testing. | **Selected by C-022 and C-025–C-027.** Use Drizzle and Neon's HTTP driver server-side. Clerk authenticates; PostgreSQL authorizes rows. |
 | Supabase Postgres + Auth | Full PostgreSQL with integrated passwordless/social auth and RLS-aware JWT integration. | Couples the database and auth platform; inactive free projects can require restoration behavior that the owner does not want for this project. | **Superseded.** Retained for decision history; do not add new Supabase dependencies or project structure. |
 | SQLite/server-local database | Very cheap and simple locally. | Multi-device accounts, serverless deployment, concurrency, backups, RLS, and later worker access require an early migration. | Development fixture only, not the product database. |
 
-Neon's serverless driver provides HTTP and WebSocket transports. Wip uses the HTTP transport for its current one-shot, non-interactive read queries; an interactive transaction requirement should trigger a deliberate re-evaluation. Runtime requests use the pooled URL containing the `-pooler` hostname, while drizzle-kit uses the direct URL because Neon recommends direct connections for migrations. Free computes suspend when idle and automatically reactivate on a query. Official references: [Neon serverless driver](https://neon.com/docs/serverless/serverless-driver), [Neon connection pooling](https://neon.com/docs/connect/connection-pooling), [Neon scale to zero](https://neon.com/docs/introduction/scale-to-zero), [Drizzle with Neon](https://orm.drizzle.team/docs/get-started/neon-new), [drizzle-kit generate](https://orm.drizzle.team/docs/drizzle-kit-generate), and [drizzle-kit migrate](https://orm.drizzle.team/docs/drizzle-kit-migrate).
+Neon's serverless driver provides HTTP and WebSocket transports. Wip uses HTTP for current one-shot reads and supplies Clerk's custom JWT through the driver's `authToken` option. Neon validates it against the configured Clerk JWKS and exposes the verified subject through `auth.user_id()`. Runtime requests use the passwordless pooled `authenticated@` URL; privileged seed tooling uses `DATABASE_URL`; drizzle-kit alone uses the direct `DIRECT_DATABASE_URL`. An interactive write transaction requirement must trigger a deliberate driver review. Official references: [Neon serverless driver](https://neon.com/docs/serverless/serverless-driver), [Neon RLS](https://neon.com/docs/guides/row-level-security), [Neon project RLS settings](https://neon.com/docs/manage/projects), [Clerk Next.js auth](https://clerk.com/docs/reference/nextjs/app-router/auth), [Clerk JWT templates](https://clerk.com/docs/guides/sessions/jwt-templates), [Clerk sign-in methods](https://clerk.com/docs/guides/configure/auth-strategies/sign-up-sign-in-options), and [Drizzle with Neon](https://orm.drizzle.team/docs/get-started/neon-new).
 
 ### Monorepo tooling
 
@@ -137,7 +138,7 @@ At production maturity, `apps/web` owns:
 - export/deletion orchestration; and
 - read models for Today, table/Kanban, and application detail.
 
-Milestone 1A implemented the responsive screens and read-oriented application boundary over fictional seed data. Milestone 1B-1 preserves those screens and adds a server-only Neon repository behind the same interface. Authentication, authenticated authorization, `/api/v1`, export/deletion orchestration, and write commands begin in Milestone 1B-2. The data source is selected explicitly; a missing Neon configuration may fall back to demo data only in development/test, never silently in production.
+Milestone 1A implemented the responsive screens and read-oriented application boundary over fictional seed data. Milestone 1B-1 added the server-only Neon repository. Milestone 1B-2 adds Clerk authentication, internal owner provisioning, and RLS while keeping the application read-only. `/api/v1`, export/deletion orchestration, and write commands begin in Milestone 1B-3. The data source is selected explicitly; demo data may be used only through deliberate demo configuration and never silently in production.
 
 Use Next.js Route Handlers for the stable external API because Server Actions are coupled to the web build and are not the right contract for an extension or worker. Web server components may call the same domain/application services directly, but there must be one implementation of each command rule.
 
@@ -170,9 +171,11 @@ Nested document, contact, and note endpoints can follow the same ownership patte
 - Put serializable input/output schemas in `packages/schemas` using a runtime validator such as Zod.
 - Define the PostgreSQL model in `packages/database` with Drizzle's TypeScript schema and generate reviewable SQL migrations with drizzle-kit. Check both the schema and generated SQL into source control. Production changes run `drizzle-kit migrate`; automatic schema pushing is not a production strategy.
 - Perform event insertion, confirmation audit, and projection update transactionally.
-- Every user-owned table has a non-null `owner_id`. Composite owner/identifier foreign keys prevent cross-owner relationships, and every repository query includes the owner predicate. Milestone 1B-2 must add a non-owner runtime role, auth-derived owner context, RLS policies, and tests that attempt cross-user reads/writes before real users are admitted.
-- `DATABASE_URL`, `DIRECT_DATABASE_URL`, and any privileged database access are server-only. They must never use a `NEXT_PUBLIC_` prefix, enter a browser bundle, or be sent to the extension. Prefer web/API command handlers for all writes so audit and validation are centralized.
-- The Neon HTTP driver is appropriate for the read-only, one-shot queries in 1B-1. Before implementing multi-statement interactive write transactions in 1B-2, verify whether the driver/ORM transaction support meets the command's atomicity needs; use Neon's WebSocket driver or another supported server-side transaction path if required.
+- Every user-owned table has a non-null `owner_id`; composite keys prevent cross-owner relationships and repository predicates provide defense in depth. All 11 owner/identity tables enable and force RLS. Policies compare `owner_id` with the internal UUID returned by `wip_current_owner_id()`, which maps only the Neon-verified `auth.user_id()` Clerk subject.
+- Authenticated web requests never accept `owner_id` or auth subject as caller input. Their request-local repository gets a Clerk custom JWT server-side and connects with `NEON_AUTHENTICATED_DATABASE_URL`. The passwordless `authenticated` role is `NOBYPASSRLS`, has SELECT on current tables, and can execute only the zero-argument owner-provision function.
+- `DATABASE_URL`, `DIRECT_DATABASE_URL`, `CLERK_SECRET_KEY`, and privileged database access are server-only. `DATABASE_URL` is seed-only, `DIRECT_DATABASE_URL` is migration-only, and neither is normal web runtime configuration. No database URL or secret can use a `NEXT_PUBLIC_` prefix, enter a browser bundle, or be sent to the extension.
+- The JWT is supplied per Neon HTTP request, so verified identity is not stored in a caller-controlled PostgreSQL setting or a reusable pooled SQL session. Missing, malformed, expired, wrong-audience, or otherwise invalid tokens fail closed at Clerk/Neon before data is returned.
+- Before implementing multi-statement write transactions in 1B-3, verify the driver/ORM transaction path and centralize all writes in authorization-aware commands.
 
 ## 6. Extension capture layer
 
@@ -204,7 +207,9 @@ Do not request `tabs`, `history`, `cookies`, `webRequest`, `declarativeNetReques
 
 ### Authentication
 
-Authentication is explicitly deferred to Milestone 1B-2. Clerk is the leading candidate, but neither the provider nor the launch sign-in methods are confirmed. The selected provider's immutable subject must map to Wip's internal owner record; provider claims must not become ad hoc ownership strings throughout the schema.
+Clerk is the web identity provider. Initial methods are Google and passwordless email verification links, rendered with Clerk's prebuilt Next.js components. Next.js 16 uses `proxy.ts` with `clerkMiddleware()` to expose verified session state; each protected page and data function still checks authentication next to the resource with `auth()`/`auth.protect()`. The public root renders an intentional signed-out landing instead of tracker data.
+
+Clerk's immutable `sub` is stored once on the provider-neutral internal owner. First authenticated access calls `wip_provision_owner()` with no arguments; the security-definer function reads only Neon-verified `auth.user_id()` and returns the existing/new internal UUID. A unique Clerk-subject index makes retries and concurrent first requests idempotent. New owners remain empty, and the seed owner has no auth subject.
 
 At the start of Milestone 2, threat-model a user-initiated `launchWebAuthFlow`, a short-lived access token, and a revocable extension credential scoped to the Wip API. Store access tokens in `chrome.storage.session`; if a refresh credential must persist, minimize its scope and rotate it. Never copy a web session cookie or request the `cookies` permission. Reference: [Chrome Identity API](https://developer.chrome.com/docs/extensions/reference/api/identity).
 
@@ -259,13 +264,18 @@ PostgreSQL is adequate for early batch aggregates. Move private facts to a dedic
 ### Milestone 1B-1
 
 - Add one Neon development branch/database, Drizzle schema, checked-in SQL migrations, an idempotent fictional seed, and a Neon-backed read repository.
-- Use `DATABASE_URL` for the pooled serverless runtime connection and `DIRECT_DATABASE_URL` for drizzle-kit migrations. Use a separate disposable Neon branch or database URL for integration tests.
+- During 1B-1, `DATABASE_URL` served the fictional pooled read/seed path and `DIRECT_DATABASE_URL` served migrations. Milestone 1B-2 supersedes normal runtime use of `DATABASE_URL` with the passwordless authenticated URL. Use a separate disposable Neon branch for integration tests.
 - Keep the in-memory demo source available only through explicit configuration. In production mode it must fail closed unless a deliberate build/demo override is supplied; missing database credentials must not silently select demo data.
 - Do not deploy, configure authentication, expose mutations, or invite real-user data during this slice.
 
-### Milestone 1B-2 and later
+### Milestone 1B-2
 
-- Select and integrate authentication (Clerk is the leading candidate), map the provider subject to Wip owners, create a least-privilege runtime database role, and enforce/test PostgreSQL RLS before real-user beta use.
+- Add Clerk with Google and email-link authentication, map verified subjects idempotently to internal owners, create the least-privilege `authenticated` database role, and enforce/test PostgreSQL RLS.
+- Use `NEON_AUTHENTICATED_DATABASE_URL` only for request-time authenticated reads. Keep `DATABASE_URL` limited to seed tooling and `DIRECT_DATABASE_URL` limited to migrations.
+- Preserve the explicit local/test demo and read-only product. Do not add mutations, `/api/v1`, deployment, or real-user beta data in this slice.
+
+### Milestone 1B-3 and later
+
 - Add `/api/v1`, transactionally safe commands, export/deletion behavior, and isolated preview/production environments.
 - Production initially remains one Vercel web deployment and one Neon project/database, with separate branches or projects where isolation requires them. Set spend alerts and review function/database/storage usage monthly.
 
@@ -309,12 +319,19 @@ Milestone 1B-1 gate (resolved 2026-08-04):
 - retain the explicit in-memory source for test/local demo use without a silent production fallback; and
 - retain metadata-only document handling through the initial beta.
 
-Before Milestone 1B-2:
+Milestone 1B-2 gate (resolved 2026-08-04):
 
-- confirm the auth provider and sign-in methods (Clerk is only the current candidate);
-- define auth-subject-to-owner mapping, least-privilege runtime role, RLS owner context, and cross-tenant tests;
-- choose a transaction-capable driver path for write commands; and
-- define the real API command boundary and deletion/export implementation.
+- use Clerk with Google and passwordless email links;
+- use a Clerk custom JWT with a fixed audience and register its JWKS with Neon RLS;
+- map verified Clerk subjects to unique internal owner UUIDs through a zero-argument idempotent database function;
+- enable and force RLS for every owner/identity table; use a passwordless, `NOBYPASSRLS`, read-only authenticated role; and
+- keep the product read-only and the demo source explicit.
+
+Before Milestone 1B-3:
+
+- choose a transaction-capable driver path for write commands;
+- define the real API command boundary and deletion/export implementation; and
+- add write-side RLS policies only alongside tested command semantics and strict ownership checks.
 
 Before Milestone 2:
 

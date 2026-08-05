@@ -114,60 +114,90 @@ Translate the event-first model into a deployable PostgreSQL foundation and prov
 - `/api/v1`, transactional command handling, export, deletion, and production deployment.
 - Kanban, extension, email ingestion, Hiring Pulse, and file upload/content storage.
 
-## Milestone 1B-2 — Authenticated manual tracker completion
+## Milestone 1B-2 — Authentication and tenant isolation
 
 ### Goal
 
-Replace the fictional adapter with the production web system of record and complete the manually managed tracker without rewriting the Milestone 1A screens.
+Add production-shaped authentication, internal owner provisioning, and database-enforced read isolation without adding application mutations or changing the existing repository/UI contract.
 
 ### User-visible scope
 
-- Sign in and sign out using the provider and methods confirmed at the start of 1B-2. Clerk is the leading candidate, not yet a final decision.
-- Create, edit, archive, restore, and delete applications.
-- Paste and save immutable job-description snapshots.
-- Add backdated or current manual timeline events and see the derived current stage.
-- Record document-version metadata and mark exact versions as prepared/submitted.
-- Manage contacts, notes, and next actions.
-- Use Today, applications table, and application detail on desktop and mobile; add Kanban at the end of Milestone 1B-2.
-- Complete/reschedule actions and see in-app due/overdue states in the user's timezone.
-- Export personal data in a lossless JSON baseline.
+- Intentional signed-out landing page.
+- Clerk sign-in/sign-up with Google and passwordless email verification links.
+- Account menu with account management and sign-out.
+- Protected Today, Applications, and Application Detail data.
+- A clear empty state for a new authenticated owner; no automatic demo-data copy.
+- Preserve the explicit fictional demo and all existing responsive read behavior.
 
 ### Technical scope
 
-- Build on the pnpm/Turborepo TypeScript monorepo and `apps/web` established in Milestone 1A.
-- Integrate the selected auth provider with the existing Neon PostgreSQL/Drizzle foundation, auth-derived owner context, least-privilege database access, RLS, typed validation, and `/api/v1` command/query routes.
-- Implement shared event taxonomy, stage projector, confirmation policy, and Today calculations as tested pure domain code.
-- Add deterministic fictional seed data that covers active, overdue, interviewing, offer, rejected, archived, multiple-snapshot, and multiple-document-version states.
-- Establish CI for lint, strict type-check, unit/integration tests, database/RLS tests, and a small Playwright critical path.
-- Add sanitized structured logging and environment validation.
+- Use current `@clerk/nextjs` APIs and Next.js 16 `proxy.ts`; enforce auth next to every protected page/data resource.
+- Request the configured short-lived Clerk custom JWT server-side and pass it through Neon's driver `authToken` option.
+- Register Clerk's JWKS and fixed audience with Neon RLS; use the passwordless `authenticated@` runtime connection.
+- Idempotently map verified Clerk `sub` to an internal owner UUID through a zero-argument function.
+- Enable and force RLS on `owners` and all ten `owner_id` tables. Use a `NOBYPASSRLS` authenticated role with SELECT plus only the owner-provision function.
+- Keep privileged migration and seed URLs out of normal web runtime and keep authenticated repositories request-local.
+- Add offline policy/config/UI coverage and opt-in live two-user RLS tests.
 
 ### Acceptance criteria
 
-1. A new authenticated user can create an application with company and role, optionally paste a job description, and receive a confirmed `application.created` event.
-2. Saving a second job description inserts a second immutable snapshot; the first remains byte-for-byte unchanged and can still be viewed.
-3. Manual events can be backdated, are ordered by occurrence time, retain creation time, and deterministically update the stage projection.
-4. A correction is auditable and does not destructively rewrite the original event.
-5. The Today screen correctly separates overdue, due-today, next-seven-days, needs-attention, and recent activity using the configured timezone.
-6. The table supports the specified search, filters, sorting, URL state, and responsive card layout.
-7. Kanban displays the same records and filters as the table. Dragging or keyboard/menu movement creates a manual confirmed event; terminal or unusual backward transitions ask for confirmation.
-8. Application detail shows header, next action, timeline, snapshot versions, document uses, contacts, and notes in the specified responsive order.
-9. Document use points to an immutable document version; editing a logical document does not change past associations.
-10. User A cannot read, mutate, link, export, or delete User B's data through the UI, API, or direct exposed database API. Automated RLS tests prove this.
-11. Per-application deletion removes owned children. Account export is complete for implemented entities. Account deletion behavior is implemented before any real-user beta, even if the first internal demo uses a controlled account.
-12. Seed data is available only in local/test/demo environments and contains no real personal data.
-13. Keyboard navigation, visible focus, form labels/errors, reduced-motion behavior, and narrow-screen layouts pass an accessibility/responsive review.
-14. `pnpm lint`, `pnpm typecheck`, relevant tests, and the Milestone 1 Playwright critical path pass in CI.
+1. Signed-out users see the public landing/auth routes and cannot render Today, application lists/details, or any future non-public API data.
+2. Google and passwordless email-link sign-in are presented by Clerk after the documented dashboard configuration.
+3. First verified access provisions exactly one internal owner for the Clerk subject; retries return the same UUID and the browser cannot supply either identifier.
+4. New owners receive no applications and never see the fictional seed.
+5. User A cannot read User B's rows even when User B's internal UUID or public application ID is known.
+6. Missing, malformed, expired, wrong-signature, wrong-issuer, or wrong-audience JWTs fail closed at the authentication/Neon boundary.
+7. All identity/owned tables have enabled and forced RLS; the runtime role cannot bypass RLS or write tracker tables.
+8. The demo source still works only through explicit configuration and cannot silently activate in production.
+9. Existing UI/domain tests remain green; formatting, lint, strict type-check, applicable integration tests, build, and responsive/accessibility QA pass when the required credentials are configured.
 
 ### Deliberately postponed
 
-- Chrome extension and any browser permissions.
-- Automatic job-page extraction or broad site adapters.
-- Forwarded email, inbox connections, and model calls.
-- Pending automated event proposals beyond a static/dev fixture used to reserve UI space.
-- Hiring Pulse contribution, cohort dimensions, or public statistics.
-- Email, push, browser, SMS, or calendar reminders; Milestone 1 is in-app only.
-- Resume/cover-letter file uploads or content parsing; metadata only.
-- Imports, bulk edits, teams, native mobile apps, job discovery, and auto-apply.
+- All application, event, snapshot, document, contact, note, and next-action mutations.
+- General `/api/v1` query/command routes, transactional writes, export, deletion, and deployment.
+- Kanban until the end of Milestone 1.
+- Chrome extension, email ingestion, Hiring Pulse, file content/uploads, billing, and external beta admission.
+
+## Milestone 1B-3 — Authenticated manual tracker completion
+
+### Goal
+
+Complete the manually managed tracker over the authenticated Neon system of record without rewriting the Milestone 1A screens.
+
+### User-visible scope
+
+- Create, edit, archive, restore, and delete applications.
+- Paste and save immutable job-description snapshots.
+- Add backdated/current manual events and see the derived stage.
+- Record document-version metadata and exact prepared/submitted uses.
+- Manage contacts, notes, and next actions; complete/reschedule actions.
+- Export personal data in a lossless JSON baseline.
+- Add Kanban at the end of Milestone 1.
+
+### Technical scope
+
+- Add typed `/api/v1` query/command routes and transactionally safe event/projection writes.
+- Add write-side RLS policies only with tested command semantics and strict owner checks.
+- Implement shared event taxonomy, stage projector, confirmation policy, export, and deletion behavior.
+- Add CI, a small Playwright critical path, and sanitized structured logging.
+
+### Acceptance criteria
+
+1. A new authenticated user can create an application with an optional immutable snapshot and a confirmed `application.created` event.
+2. Recapture inserts a new immutable snapshot; manual/backdated events retain occurrence and creation time and deterministically project stage.
+3. Corrections are auditable and never destructively rewrite history.
+4. Today, table/cards, detail, search/filter/sort, document uses, contacts, notes, and actions work across desktop/mobile.
+5. Kanban uses the same records/commands and provides keyboard/menu status movement.
+6. User A cannot read, mutate, link, export, or delete User B's data through UI, API, or exposed database access.
+7. Application/account deletion and complete export exist before real-user beta.
+8. Accessibility, formatting, lint, type-check, unit/integration/RLS tests, build, and the critical Playwright path pass.
+
+### Deliberately postponed
+
+- Chrome extension and browser permissions until Milestone 2.
+- Forwarded email/model calls until Milestone 3.
+- Hiring Pulse until Milestone 4.
+- External reminder channels, file content/uploads, imports, bulk editing, teams, native apps, job discovery, and auto-apply.
 
 ## Milestone 2 — Current-job Chrome capture
 
@@ -314,9 +344,9 @@ Show privacy-protected aggregate hiring timelines and rates from explicitly cons
 3. Build Today, Applications table/cards, and Application Detail.
 4. Complete responsive/accessibility, interaction tests, browser QA, and production build validation; stop at the 1A boundary.
 5. **Milestone 1B-1:** add Neon/Drizzle schema, checked-in migrations, fictional idempotent seed, read repository, and database integration tests.
-6. **Milestone 1B-2:** select/integrate authentication, establish least-privilege runtime access and RLS, then add `/api/v1` application commands.
-7. Add creation/editing, immutable persisted snapshots/events/actions, export, and deletion foundations.
+6. **Milestone 1B-2:** integrate Clerk, idempotent owner provisioning, least-privilege authenticated reads, and forced RLS; remain read-only.
+7. **Milestone 1B-3:** add `/api/v1` commands, creation/editing, immutable persisted snapshots/events/actions, export, and deletion foundations.
 8. Add Kanban over the same query/commands at the end of Milestone 1.
 9. Complete cross-user, security/privacy, and end-to-end validation before beta.
 
-Milestone 1A validates the screens and read model first. Milestone 1B-1 proves persistent read parity; 1B-2 then adds authenticated production behavior without changing every component.
+Milestone 1A validates the screens and read model first. Milestone 1B-1 proves persistent read parity; 1B-2 adds authenticated read isolation; 1B-3 completes manual tracker mutations without changing every component.

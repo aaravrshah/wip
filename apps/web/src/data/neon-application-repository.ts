@@ -6,13 +6,14 @@ import {
   applicationEvents,
   applications,
   contacts,
-  createDatabase,
+  createAuthenticatedDatabase,
   documentVersions,
   documents,
   jobDescriptionSnapshots,
   nextActions,
   notes,
 } from '@wip/database';
+import type { createDatabase } from '@wip/database';
 import type {
   Application,
   ApplicationNote,
@@ -22,7 +23,7 @@ import type {
   NextAction,
   TimelineEvent,
 } from '@wip/domain';
-import { and, asc, desc, eq } from 'drizzle-orm';
+import { and, asc, desc, eq, sql } from 'drizzle-orm';
 
 import type { ApplicationRepository } from './application-repository';
 
@@ -74,19 +75,40 @@ function actionKind(kind: (typeof nextActions.$inferSelect)['kind']): NextAction
   return kind === 'follow_up' ? 'follow-up' : kind;
 }
 
-export function createNeonApplicationRepository({
-  databaseUrl,
-  ownerId,
+export async function createAuthenticatedNeonApplicationRepository({
+  authenticatedDatabaseUrl,
+  databaseToken,
 }: {
-  databaseUrl: string;
-  ownerId: string;
-}): ApplicationRepository {
-  const database = createDatabase(databaseUrl);
+  authenticatedDatabaseUrl: string;
+  databaseToken: string;
+}): Promise<ApplicationRepository> {
+  if (!databaseToken.trim()) {
+    throw new Error('A verified database token is required.');
+  }
 
-  return createNeonApplicationRepositoryWithDatabase(database, ownerId);
+  const database = createAuthenticatedDatabase(authenticatedDatabaseUrl, databaseToken);
+  const ownerId = await provisionAuthenticatedOwner(database);
+
+  return createOwnerScopedNeonApplicationRepositoryForTooling(database, ownerId);
 }
 
-export function createNeonApplicationRepositoryWithDatabase(
+export async function provisionAuthenticatedOwner(database: Database): Promise<string> {
+  const result = await database.execute<{ ownerId: string }>(
+    sql`select public.wip_provision_owner() as "ownerId"`,
+  );
+  const ownerId = result.rows[0]?.ownerId;
+
+  if (!ownerId) {
+    throw new Error('Authenticated owner provisioning did not return an owner identifier.');
+  }
+
+  return ownerId;
+}
+
+// This explicit-owner adapter is reserved for trusted migrations, seed tooling, and integration
+// tests. Authenticated web requests must use createAuthenticatedNeonApplicationRepository so the
+// owner comes from Neon's verified JWT context instead of caller input.
+export function createOwnerScopedNeonApplicationRepositoryForTooling(
   database: Database,
   ownerId: string,
 ): ApplicationRepository {

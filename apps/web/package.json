@@ -12,6 +12,7 @@
     "test:integration": "vitest run src/data/neon-application-repository.integration.test.ts"
   },
   "dependencies": {
+    "@clerk/nextjs": "7.6.5",
     "@wip/database": "workspace:*",
     "@wip/domain": "workspace:*",
     "@wip/fixtures": "workspace:*",

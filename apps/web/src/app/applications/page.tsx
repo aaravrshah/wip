@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 
 import { ApplicationsExplorer } from '@/components/applications-explorer';
+import { TrackerEmptyState } from '@/components/tracker-empty-state';
 import { applicationRepository } from '@/data';
 
 export const metadata: Metadata = {
@@ -11,6 +12,10 @@ export const dynamic = 'force-dynamic';
 
 export default async function ApplicationsPage() {
   const applications = await applicationRepository.listApplications();
+
+  if (applications.length === 0) {
+    return <TrackerEmptyState context="applications" />;
+  }
 
   return (
     <div className="page-stack">
