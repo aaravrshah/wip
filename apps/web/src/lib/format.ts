@@ -1,39 +1,37 @@
-const dateFormatter = new Intl.DateTimeFormat('en-US', {
-  month: 'short',
-  day: 'numeric',
-  year: 'numeric',
-  timeZone: 'America/New_York',
-});
+function formatWithTimeZone(
+  value: string | Date,
+  timeZone: string,
+  options: Intl.DateTimeFormatOptions,
+): string {
+  try {
+    return new Intl.DateTimeFormat('en-US', { ...options, timeZone }).format(new Date(value));
+  } catch {
+    return new Intl.DateTimeFormat('en-US', { ...options, timeZone: 'UTC' }).format(
+      new Date(value),
+    );
+  }
+}
 
-const shortDateFormatter = new Intl.DateTimeFormat('en-US', {
-  month: 'short',
-  day: 'numeric',
-  timeZone: 'America/New_York',
-});
+export const formatDate = (value?: string, timeZone = 'UTC') =>
+  value
+    ? formatWithTimeZone(value, timeZone, { month: 'short', day: 'numeric', year: 'numeric' })
+    : '—';
 
-const dateTimeFormatter = new Intl.DateTimeFormat('en-US', {
-  weekday: 'short',
-  month: 'short',
-  day: 'numeric',
-  hour: 'numeric',
-  minute: '2-digit',
-  timeZone: 'America/New_York',
-});
+export const formatShortDate = (value: string, timeZone = 'UTC') =>
+  formatWithTimeZone(value, timeZone, { month: 'short', day: 'numeric' });
 
-const weekdayFormatter = new Intl.DateTimeFormat('en-US', {
-  weekday: 'long',
-  month: 'long',
-  day: 'numeric',
-  timeZone: 'America/New_York',
-});
+export const formatDateTime = (value: string, timeZone = 'UTC') =>
+  formatWithTimeZone(value, timeZone, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZoneName: 'short',
+  });
 
-export const formatDate = (value?: string) => (value ? dateFormatter.format(new Date(value)) : '—');
-
-export const formatShortDate = (value: string) => shortDateFormatter.format(new Date(value));
-
-export const formatDateTime = (value: string) => dateTimeFormatter.format(new Date(value));
-
-export const formatDayHeading = (value: Date) => weekdayFormatter.format(value);
+export const formatDayHeading = (value: Date, timeZone = 'UTC') =>
+  formatWithTimeZone(value, timeZone, { weekday: 'long', month: 'long', day: 'numeric' });
 
 export function initials(value: string): string {
   return value

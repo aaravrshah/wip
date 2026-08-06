@@ -3,8 +3,13 @@ packages:
   - packages/*
 
 allowBuilds:
+  browser-tabs-lock: false
+  bufferutil: false
+  core-js: false
   esbuild: true
   unrs-resolver: true
+  sharp: true
+  utf-8-validate: false
 
 minimumReleaseAgeExclude:
   - tsx@4.23.6
@@ -13,5 +18,6 @@ minimumReleaseAgeExclude:
   - '@clerk/react@6.12.11'
   - '@clerk/shared@4.26.0'
 
-onlyBuiltDependencies:
-  - sharp
+overrides:
+  '@clerk/ui': 1.27.2
+  utf-8-validate: 5.0.10

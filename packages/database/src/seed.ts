@@ -69,6 +69,15 @@ function toEventKind(
   return kind === 'follow-up' ? 'follow_up' : kind;
 }
 
+function toContactRelationship(relationship: string) {
+  const normalized = relationship.toLocaleLowerCase();
+  if (normalized.includes('recruit')) return 'recruiter' as const;
+  if (normalized.includes('referr')) return 'referrer' as const;
+  if (normalized.includes('interview')) return 'interviewer' as const;
+  if (normalized.includes('hiring')) return 'hiring_manager' as const;
+  return 'other' as const;
+}
+
 function eventType(event: TimelineEvent): string {
   const normalizedTitle = event.title.toLowerCase();
 
@@ -167,22 +176,26 @@ export async function seedDemoData(
       )
       .onConflictDoNothing();
 
+    const snapshot = application.snapshot;
+    if (!snapshot)
+      throw new Error(`Fictional seed application ${application.id} needs a snapshot.`);
+
     await database
       .insert(jobDescriptionSnapshots)
       .values({
         id: stableUuid(`snapshot:${application.id}`),
         ownerId,
         applicationId,
-        capturedAt: toDate(application.snapshot.capturedAt),
+        capturedAt: toDate(snapshot.capturedAt),
         captureSource: 'demo_seed',
-        sourceUrl: application.snapshot.sourceUrl,
-        descriptionHtml: application.snapshot.html,
-        descriptionText: application.snapshot.text,
-        contentSha256: normalizeSha256(application.snapshot.contentHash),
-        extractorVersion: application.snapshot.extractorVersion,
-        provenance: application.snapshot.provenance,
+        sourceUrl: snapshot.sourceUrl,
+        descriptionHtml: snapshot.html,
+        descriptionText: snapshot.text,
+        contentSha256: normalizeSha256(snapshot.contentHash),
+        extractorVersion: snapshot.extractorVersion,
+        provenance: snapshot.provenance,
         captureMetadata: { fixture: true },
-        createdAt: toDate(application.snapshot.capturedAt),
+        createdAt: toDate(snapshot.capturedAt),
       })
       .onConflictDoNothing();
 
@@ -252,7 +265,7 @@ export async function seedDemoData(
           ownerId,
           applicationId,
           contactId,
-          relationship: contact.relationship,
+          relationship: toContactRelationship(contact.relationship),
           createdAt: toDate(application.updatedAt),
         })
         .onConflictDoNothing();

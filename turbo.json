@@ -6,7 +6,12 @@
     "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY",
     "CLERK_SECRET_KEY",
     "CLERK_JWT_TEMPLATE",
-    "NEON_AUTHENTICATED_DATABASE_URL"
+    "NEON_AUTHENTICATED_DATABASE_URL",
+    "WIP_WEB_ORIGIN",
+    "WIP_EXTENSION_ORIGINS",
+    "WXT_WIP_API_ORIGIN",
+    "WXT_CLERK_PUBLISHABLE_KEY",
+    "WXT_CLERK_FRONTEND_API_ORIGIN"
   ],
   "tasks": {
     "dev": {
@@ -25,6 +30,12 @@
     },
     "@wip/fixtures#build": {
       "outputs": []
+    },
+    "@wip/schemas#build": {
+      "outputs": []
+    },
+    "@wip/extension#build": {
+      "outputs": [".output/**"]
     },
     "format:check": {
       "outputs": []

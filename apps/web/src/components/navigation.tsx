@@ -1,12 +1,13 @@
 'use client';
 
-import { BriefcaseBusiness, CalendarDays } from 'lucide-react';
+import { BriefcaseBusiness, CalendarDays, Settings } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
 const items = [
   { href: '/', label: 'Today', icon: CalendarDays },
   { href: '/applications', label: 'Applications', icon: BriefcaseBusiness },
+  { href: '/settings', label: 'Data & privacy', icon: Settings },
 ];
 
 export function Navigation() {

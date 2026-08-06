@@ -29,6 +29,8 @@ interface TodayDashboardProps {
   overdue: Application[];
   awaiting: Application[];
   recent: Application[];
+  canManage?: boolean;
+  timeZone?: string;
 }
 
 function CompanyMark({ company }: { company: string }) {
@@ -47,6 +49,8 @@ export function TodayDashboard({
   overdue,
   awaiting,
   recent,
+  canManage = false,
+  timeZone = 'UTC',
 }: TodayDashboardProps) {
   const activeCount = applications.filter(
     (application) => !['accepted', 'rejected', 'withdrawn'].includes(application.stage),
@@ -56,15 +60,18 @@ export function TodayDashboard({
     <div className="page-stack">
       <section className="today-hero" aria-labelledby="today-heading">
         <div>
-          <p className="eyebrow">{formatDayHeading(referenceDate)}</p>
+          <p className="eyebrow">{formatDayHeading(referenceDate, timeZone)}</p>
           <h1 id="today-heading">Your search, one clear step at a time.</h1>
           <p className="hero-copy">
             You have {upcoming.length} upcoming conversations or assessments and {overdue.length}{' '}
             follow-ups ready for attention.
           </p>
         </div>
-        <Link className="button button-primary" href="/applications">
-          View all applications
+        <Link
+          className="button button-primary"
+          href={canManage ? '/applications/new' : '/applications'}
+        >
+          {canManage ? 'Add application' : 'View all applications'}
           <ArrowRight aria-hidden="true" size={18} />
         </Link>
       </section>
@@ -116,7 +123,9 @@ export function TodayDashboard({
                     {item.company} · {item.role}
                   </span>
                 </span>
-                <time dateTime={item.action.dueAt}>{formatDateTime(item.action.dueAt)}</time>
+                <time dateTime={item.action.dueAt}>
+                  {formatDateTime(item.action.dueAt, timeZone)}
+                </time>
                 <ArrowRight className="item-arrow" aria-hidden="true" size={17} />
               </Link>
             ))}
@@ -213,7 +222,7 @@ export function TodayDashboard({
               <strong>{application.company}</strong>
               <span>{application.role}</span>
               <time dateTime={application.updatedAt}>
-                Updated {formatShortDate(application.updatedAt)}
+                Updated {formatShortDate(application.updatedAt, timeZone)}
               </time>
             </Link>
           ))}

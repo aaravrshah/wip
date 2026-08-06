@@ -2,7 +2,7 @@ import { describe, expect, test, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
-import { parseServerEnvironment } from './server';
+import { parseExtensionOrigins, parseServerEnvironment } from './server';
 
 describe('server environment selection', () => {
   test('uses demo data by default outside production', () => {
@@ -61,5 +61,15 @@ describe('server environment selection', () => {
         'postgresql://authenticated@example-pooler.invalid/placeholder?sslmode=require',
       clerkJwtTemplate: 'wip-neon',
     });
+  });
+
+  test('accepts only exact Chrome extension origins', () => {
+    expect(
+      parseExtensionOrigins(
+        'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa,chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+      ),
+    ).toHaveLength(2);
+    expect(() => parseExtensionOrigins('chrome-extension://*/')).toThrow();
+    expect(() => parseExtensionOrigins('https://extension.example.invalid')).toThrow();
   });
 });

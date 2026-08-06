@@ -1,6 +1,8 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: vi.fn() }) }));
 
 import { demoApplications } from '@wip/fixtures';
 
@@ -43,5 +45,29 @@ describe('ApplicationsExplorer', () => {
     const rows = within(screen.getByRole('table')).getAllByRole('row').slice(1);
     expect(rows[0]).toHaveTextContent('Aster & Finch');
     expect(rows.at(-1)).toHaveTextContent('Willow Circuit');
+  });
+
+  it('switches to a mobile-scroll-contained board with every canonical stage', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<ApplicationsExplorer applications={demoApplications} />);
+
+    await user.click(screen.getByRole('button', { name: 'Board' }));
+
+    expect(screen.queryByRole('table')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Applications board')).toBeInTheDocument();
+    expect(container.querySelector('.kanban-scroll')).toBeInTheDocument();
+    for (const label of [
+      'Saved',
+      'Preparing',
+      'Applied',
+      'Assessment',
+      'Interviewing',
+      'Offer',
+      'Accepted',
+      'Rejected',
+      'Withdrawn',
+    ]) {
+      expect(screen.getByRole('heading', { name: label })).toBeInTheDocument();
+    }
   });
 });

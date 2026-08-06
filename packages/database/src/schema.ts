@@ -3,6 +3,7 @@ import {
   check,
   foreignKey,
   index,
+  integer,
   jsonb,
   numeric,
   pgEnum,
@@ -30,7 +31,7 @@ export const applicationStageEnum = pgEnum('application_stage', [
   'withdrawn',
 ]);
 
-export const workplaceEnum = pgEnum('workplace', ['hybrid', 'on_site', 'remote']);
+export const workplaceEnum = pgEnum('workplace', ['hybrid', 'on_site', 'remote', 'unspecified']);
 export const waitingOnEnum = pgEnum('waiting_on', ['candidate', 'employer', 'none']);
 export const eventKindEnum = pgEnum('event_kind', [
   'application',
@@ -72,6 +73,15 @@ export const documentUsePurposeEnum = pgEnum('document_use_purpose', [
   'prepared',
   'submitted',
   'shared',
+  'requested',
+  'other',
+]);
+export const contactRelationshipEnum = pgEnum('contact_relationship', [
+  'recruiter',
+  'referrer',
+  'interviewer',
+  'hiring_manager',
+  'other',
 ]);
 export const nextActionKindEnum = pgEnum('next_action_kind', [
   'assessment',
@@ -90,6 +100,28 @@ export const authenticatedRole = pgRole('authenticated').existing();
 const ownerReadPolicy = (name: string, ownerId: AnyPgColumn) =>
   pgPolicy(name, {
     for: 'select',
+    to: authenticatedRole,
+    using: sql`${ownerId} = (select public.wip_current_owner_id())`,
+  });
+
+const ownerInsertPolicy = (name: string, ownerId: AnyPgColumn) =>
+  pgPolicy(name, {
+    for: 'insert',
+    to: authenticatedRole,
+    withCheck: sql`${ownerId} = (select public.wip_current_owner_id())`,
+  });
+
+const ownerUpdatePolicy = (name: string, ownerId: AnyPgColumn) =>
+  pgPolicy(name, {
+    for: 'update',
+    to: authenticatedRole,
+    using: sql`${ownerId} = (select public.wip_current_owner_id())`,
+    withCheck: sql`${ownerId} = (select public.wip_current_owner_id())`,
+  });
+
+const ownerDeletePolicy = (name: string, ownerId: AnyPgColumn) =>
+  pgPolicy(name, {
+    for: 'delete',
     to: authenticatedRole,
     using: sql`${ownerId} = (select public.wip_current_owner_id())`,
   });
@@ -133,6 +165,10 @@ export const applications = pgTable(
       .notNull()
       .references(() => owners.id, { onDelete: 'cascade' }),
     publicId: text('public_id').notNull(),
+    version: integer('version').notNull().default(1),
+    createIdempotencyKey: text('create_idempotency_key'),
+    createRequestHash: text('create_request_hash'),
+    lastMutationId: uuid('last_mutation_id'),
     companyName: text('company_name').notNull(),
     roleTitle: text('role_title').notNull(),
     locationText: text('location_text').notNull(),
@@ -140,6 +176,9 @@ export const applications = pgTable(
     currentStage: applicationStageEnum('current_stage').notNull(),
     projectedAppliedAt: utcTimestamp('projected_applied_at'),
     lastConfirmedEventAt: utcTimestamp('last_confirmed_event_at').notNull(),
+    projectedStageEventId: uuid('projected_stage_event_id'),
+    projectedStageOccurredAt: utcTimestamp('projected_stage_occurred_at'),
+    projectedStageCreatedAt: utcTimestamp('projected_stage_created_at'),
     waitingOn: waitingOnEnum('waiting_on').notNull().default('none'),
     sourceUrl: text('source_url'),
     sourceName: text('source_name'),
@@ -151,13 +190,24 @@ export const applications = pgTable(
   (table) => [
     unique('applications_owner_id_id_unique').on(table.ownerId, table.id),
     unique('applications_owner_public_id_unique').on(table.ownerId, table.publicId),
+    uniqueIndex('applications_owner_create_idempotency_unique')
+      .on(table.ownerId, table.createIdempotencyKey)
+      .where(sql`${table.createIdempotencyKey} is not null`),
     index('applications_owner_stage_updated_idx').on(
       table.ownerId,
       table.currentStage,
       table.updatedAt,
     ),
     index('applications_owner_last_event_idx').on(table.ownerId, table.lastConfirmedEventAt),
+    check('applications_version_check', sql`${table.version} > 0`),
+    check(
+      'applications_create_request_hash_check',
+      sql`${table.createRequestHash} is null or (char_length(${table.createRequestHash}) = 64 and ${table.createRequestHash} ~ '^[0-9a-f]{64}$')`,
+    ),
     ownerReadPolicy('applications_owner_select', table.ownerId),
+    ownerInsertPolicy('applications_owner_insert', table.ownerId),
+    ownerUpdatePolicy('applications_owner_update', table.ownerId),
+    ownerDeletePolicy('applications_owner_delete', table.ownerId),
   ],
 ).enableRLS();
 
@@ -215,6 +265,7 @@ export const applicationEvents = pgTable(
     ),
     check('application_events_payload_version_check', sql`${table.payloadVersion} > 0`),
     ownerReadPolicy('application_events_owner_select', table.ownerId),
+    ownerInsertPolicy('application_events_owner_insert', table.ownerId),
   ],
 ).enableRLS();
 
@@ -264,6 +315,7 @@ export const jobDescriptionSnapshots = pgTable(
       sql`char_length(${table.contentSha256}) = 64 and ${table.contentSha256} ~ '^[0-9a-f]{64}$'`,
     ),
     ownerReadPolicy('job_description_snapshots_owner_select', table.ownerId),
+    ownerInsertPolicy('job_description_snapshots_owner_insert', table.ownerId),
   ],
 ).enableRLS();
 
@@ -276,13 +328,17 @@ export const documents = pgTable(
       .references(() => owners.id, { onDelete: 'cascade' }),
     kind: documentKindEnum('kind').notNull(),
     title: text('title').notNull(),
+    version: integer('version').notNull().default(1),
     createdAt: utcTimestamp('created_at').notNull().defaultNow(),
     updatedAt: utcTimestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
     unique('documents_owner_id_id_unique').on(table.ownerId, table.id),
     index('documents_owner_kind_idx').on(table.ownerId, table.kind),
+    check('documents_version_check', sql`${table.version} > 0`),
     ownerReadPolicy('documents_owner_select', table.ownerId),
+    ownerInsertPolicy('documents_owner_insert', table.ownerId),
+    ownerUpdatePolicy('documents_owner_update', table.ownerId),
   ],
 ).enableRLS();
 
@@ -322,6 +378,7 @@ export const documentVersions = pgTable(
       sql`${table.contentSha256} is null or (char_length(${table.contentSha256}) = 64 and ${table.contentSha256} ~ '^[0-9a-f]{64}$')`,
     ),
     ownerReadPolicy('document_versions_owner_select', table.ownerId),
+    ownerInsertPolicy('document_versions_owner_insert', table.ownerId),
   ],
 ).enableRLS();
 
@@ -358,6 +415,8 @@ export const applicationDocumentUses = pgTable(
     ),
     index('application_document_uses_owner_application_idx').on(table.ownerId, table.applicationId),
     ownerReadPolicy('application_document_uses_owner_select', table.ownerId),
+    ownerInsertPolicy('application_document_uses_owner_insert', table.ownerId),
+    ownerDeletePolicy('application_document_uses_owner_delete', table.ownerId),
   ],
 ).enableRLS();
 
@@ -371,13 +430,21 @@ export const contacts = pgTable(
     displayName: text('display_name').notNull(),
     email: text('email'),
     organization: text('organization'),
+    roleTitle: text('role_title'),
+    phone: text('phone'),
+    profileUrl: text('profile_url'),
+    version: integer('version').notNull().default(1),
     createdAt: utcTimestamp('created_at').notNull().defaultNow(),
     updatedAt: utcTimestamp('updated_at').notNull().defaultNow(),
   },
   (table) => [
     unique('contacts_owner_id_id_unique').on(table.ownerId, table.id),
     index('contacts_owner_name_idx').on(table.ownerId, table.displayName),
+    check('contacts_version_check', sql`${table.version} > 0`),
     ownerReadPolicy('contacts_owner_select', table.ownerId),
+    ownerInsertPolicy('contacts_owner_insert', table.ownerId),
+    ownerUpdatePolicy('contacts_owner_update', table.ownerId),
+    ownerDeletePolicy('contacts_owner_delete', table.ownerId),
   ],
 ).enableRLS();
 
@@ -390,7 +457,7 @@ export const applicationContacts = pgTable(
       .references(() => owners.id, { onDelete: 'cascade' }),
     applicationId: uuid('application_id').notNull(),
     contactId: uuid('contact_id').notNull(),
-    relationship: text('relationship').notNull(),
+    relationship: contactRelationshipEnum('relationship').notNull(),
     createdAt: utcTimestamp('created_at').notNull().defaultNow(),
   },
   (table) => [
@@ -408,6 +475,9 @@ export const applicationContacts = pgTable(
     unique('application_contacts_unique').on(table.ownerId, table.applicationId, table.contactId),
     index('application_contacts_owner_application_idx').on(table.ownerId, table.applicationId),
     ownerReadPolicy('application_contacts_owner_select', table.ownerId),
+    ownerInsertPolicy('application_contacts_owner_insert', table.ownerId),
+    ownerUpdatePolicy('application_contacts_owner_update', table.ownerId),
+    ownerDeletePolicy('application_contacts_owner_delete', table.ownerId),
   ],
 ).enableRLS();
 
@@ -420,6 +490,7 @@ export const notes = pgTable(
       .references(() => owners.id, { onDelete: 'cascade' }),
     applicationId: uuid('application_id').notNull(),
     body: text('body').notNull(),
+    version: integer('version').notNull().default(1),
     createdAt: utcTimestamp('created_at').notNull().defaultNow(),
     updatedAt: utcTimestamp('updated_at').notNull().defaultNow(),
   },
@@ -435,7 +506,11 @@ export const notes = pgTable(
       table.applicationId,
       table.createdAt,
     ),
+    check('notes_version_check', sql`${table.version} > 0`),
     ownerReadPolicy('notes_owner_select', table.ownerId),
+    ownerInsertPolicy('notes_owner_insert', table.ownerId),
+    ownerUpdatePolicy('notes_owner_update', table.ownerId),
+    ownerDeletePolicy('notes_owner_delete', table.ownerId),
   ],
 ).enableRLS();
 
@@ -453,6 +528,7 @@ export const nextActions = pgTable(
     dueAt: utcTimestamp('due_at').notNull(),
     state: nextActionStateEnum('state').notNull().default('open'),
     completedAt: utcTimestamp('completed_at'),
+    version: integer('version').notNull().default(1),
     createdAt: utcTimestamp('created_at').notNull().defaultNow(),
     updatedAt: utcTimestamp('updated_at').notNull().defaultNow(),
   },
@@ -469,7 +545,11 @@ export const nextActions = pgTable(
       'next_actions_completion_check',
       sql`(${table.state} = 'completed' and ${table.completedAt} is not null) or (${table.state} <> 'completed')`,
     ),
+    check('next_actions_version_check', sql`${table.version} > 0`),
     ownerReadPolicy('next_actions_owner_select', table.ownerId),
+    ownerInsertPolicy('next_actions_owner_insert', table.ownerId),
+    ownerUpdatePolicy('next_actions_owner_update', table.ownerId),
+    ownerDeletePolicy('next_actions_owner_delete', table.ownerId),
   ],
 ).enableRLS();
 

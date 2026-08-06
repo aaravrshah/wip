@@ -8,22 +8,37 @@ import {
   type ApplicationSort,
   type ApplicationStage,
 } from '@wip/domain';
-import { ArrowDownAZ, ArrowRight, Search, SlidersHorizontal } from 'lucide-react';
+import {
+  ArrowDownAZ,
+  ArrowRight,
+  LayoutGrid,
+  Search,
+  SlidersHorizontal,
+  Table2,
+} from 'lucide-react';
 import Link from 'next/link';
 import { useMemo, useState } from 'react';
 
 import { formatDate, formatShortDate, initials } from '@/lib/format';
 
 import { StageBadge } from './stage-badge';
+import { ApplicationsBoard } from './applications-board';
 
 interface ApplicationsExplorerProps {
   applications: Application[];
+  canManage?: boolean;
+  timeZone?: string;
 }
 
-export function ApplicationsExplorer({ applications }: ApplicationsExplorerProps) {
+export function ApplicationsExplorer({
+  applications,
+  canManage = false,
+  timeZone = 'UTC',
+}: ApplicationsExplorerProps) {
   const [search, setSearch] = useState('');
   const [stage, setStage] = useState<ApplicationStage | 'all'>('all');
   const [sort, setSort] = useState<ApplicationSort>('updated');
+  const [view, setView] = useState<'table' | 'board'>('table');
 
   const results = useMemo(
     () => queryApplications(applications, { search, stage, sort }),
@@ -91,78 +106,107 @@ export function ApplicationsExplorer({ applications }: ApplicationsExplorerProps
             Clear filters
           </button>
         )}
+        <div className="view-switch" role="group" aria-label="Applications view">
+          <button
+            type="button"
+            className={view === 'table' ? 'is-active' : undefined}
+            aria-pressed={view === 'table'}
+            onClick={() => setView('table')}
+          >
+            <Table2 aria-hidden="true" size={16} /> Table
+          </button>
+          <button
+            type="button"
+            className={view === 'board' ? 'is-active' : undefined}
+            aria-pressed={view === 'board'}
+            onClick={() => setView('board')}
+          >
+            <LayoutGrid aria-hidden="true" size={16} /> Board
+          </button>
+        </div>
       </div>
 
       {results.length > 0 ? (
-        <div className="table-frame">
-          <table className="application-table">
-            <caption className="sr-only">Your job applications</caption>
-            <thead>
-              <tr>
-                <th scope="col">Company & role</th>
-                <th scope="col">Location</th>
-                <th scope="col">Stage</th>
-                <th scope="col">Date applied</th>
-                <th scope="col">Last update</th>
-                <th scope="col">Next action</th>
-                <th scope="col">
-                  <span className="sr-only">Open</span>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {results.map((application) => (
-                <tr key={application.id}>
-                  <td data-label="Application" data-primary="true">
-                    <div className="application-primary">
-                      <span className="company-mark" aria-hidden="true">
-                        {initials(application.company)}
-                      </span>
-                      <span>
-                        <Link href={`/applications/${application.id}`}>
-                          <strong>{application.company}</strong>
-                          <span>{application.role}</span>
-                        </Link>
-                      </span>
-                    </div>
-                  </td>
-                  <td data-label="Location">
-                    <span>{application.location}</span>
-                    <small>{application.workplace}</small>
-                  </td>
-                  <td data-label="Stage">
-                    <StageBadge stage={application.stage} />
-                  </td>
-                  <td data-label="Date applied">{formatDate(application.dateApplied)}</td>
-                  <td data-label="Last update">
-                    <time dateTime={application.updatedAt}>
-                      {formatShortDate(application.updatedAt)}
-                    </time>
-                  </td>
-                  <td data-label="Next action">
-                    {application.nextAction ? (
-                      <span className="next-action-cell">
-                        <strong>{application.nextAction.title}</strong>
-                        <small>{formatShortDate(application.nextAction.dueAt)}</small>
-                      </span>
-                    ) : (
-                      <span className="muted">No next action</span>
-                    )}
-                  </td>
-                  <td data-label="Open" className="open-cell">
-                    <Link
-                      className="row-link"
-                      href={`/applications/${application.id}`}
-                      aria-label={`Open ${application.company} ${application.role}`}
-                    >
-                      <ArrowRight aria-hidden="true" size={18} />
-                    </Link>
-                  </td>
+        view === 'board' ? (
+          <ApplicationsBoard
+            key={results.map((application) => `${application.id}:${application.stage}`).join('|')}
+            applications={results}
+            canManage={canManage}
+            timeZone={timeZone}
+          />
+        ) : (
+          <div className="table-frame">
+            <table className="application-table">
+              <caption className="sr-only">Your job applications</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Company & role</th>
+                  <th scope="col">Location</th>
+                  <th scope="col">Stage</th>
+                  <th scope="col">Date applied</th>
+                  <th scope="col">Last update</th>
+                  <th scope="col">Next action</th>
+                  <th scope="col">
+                    <span className="sr-only">Open</span>
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {results.map((application) => (
+                  <tr key={application.id}>
+                    <td data-label="Application" data-primary="true">
+                      <div className="application-primary">
+                        <span className="company-mark" aria-hidden="true">
+                          {initials(application.company)}
+                        </span>
+                        <span>
+                          <Link href={`/applications/${application.id}`}>
+                            <strong>{application.company}</strong>
+                            <span>{application.role}</span>
+                          </Link>
+                        </span>
+                      </div>
+                    </td>
+                    <td data-label="Location">
+                      <span>{application.location}</span>
+                      <small>{application.workplace}</small>
+                    </td>
+                    <td data-label="Stage">
+                      <StageBadge stage={application.stage} />
+                    </td>
+                    <td data-label="Date applied">
+                      {formatDate(application.dateApplied, timeZone)}
+                    </td>
+                    <td data-label="Last update">
+                      <time dateTime={application.updatedAt}>
+                        {formatShortDate(application.updatedAt, timeZone)}
+                      </time>
+                    </td>
+                    <td data-label="Next action">
+                      {application.nextAction ? (
+                        <span className="next-action-cell">
+                          <strong>{application.nextAction.title}</strong>
+                          <small>{formatShortDate(application.nextAction.dueAt, timeZone)}</small>
+                        </span>
+                      ) : (
+                        <span className="muted">No next action</span>
+                      )}
+                    </td>
+                    <td data-label="Open" className="open-cell">
+                      <Link
+                        className="row-link"
+                        href={`/applications/${application.id}`}
+                        aria-label={`Open ${application.company} ${application.role}`}
+                      >
+                        <ArrowRight aria-hidden="true" size={18} />
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )
       ) : (
         <div className="empty-state">
           <span className="empty-state-icon" aria-hidden="true">

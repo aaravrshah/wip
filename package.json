@@ -8,7 +8,11 @@
   },
   "scripts": {
     "dev": "turbo dev --filter=@wip/web",
+    "dev:web": "turbo dev --filter=@wip/web",
+    "dev:extension": "turbo dev --filter=@wip/extension",
     "build": "turbo build",
+    "build:extension": "turbo build --filter=@wip/extension",
+    "zip:extension": "pnpm --filter @wip/extension zip",
     "db:generate": "pnpm --filter @wip/database db:generate",
     "db:migrate": "pnpm --filter @wip/database db:migrate",
     "db:seed": "pnpm --filter @wip/database db:seed",

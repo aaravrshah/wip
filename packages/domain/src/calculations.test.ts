@@ -117,6 +117,23 @@ describe('application calculations', () => {
     expect(getAwaitingResponses([overdue, accepted])).toEqual([overdue]);
   });
 
+  it('does not surface completed actions as upcoming or overdue', () => {
+    const completed = application('completed', 'interviewing', {
+      nextAction: {
+        id: 'completed-action',
+        kind: 'interview',
+        title: 'Completed fictional interview',
+        dueAt: '2026-08-03T09:00:00-04:00',
+        state: 'completed',
+        completedAt: '2026-08-03T10:00:00-04:00',
+      },
+    });
+
+    expect(getUpcomingItems([completed], now)).toEqual([]);
+    completed.nextAction!.kind = 'follow-up';
+    expect(getOverdueFollowUps([completed], now)).toEqual([]);
+  });
+
   it('searches, filters, and sorts without mutating the source list', () => {
     const source = [
       application('zeta', 'applied', {

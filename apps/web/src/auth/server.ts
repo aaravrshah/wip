@@ -52,3 +52,15 @@ export async function requireAuthenticatedDatabaseIdentity(): Promise<Authentica
   const session = await auth.protect();
   return resolveAuthenticatedDatabaseIdentity(session, environment.clerkJwtTemplate);
 }
+
+export async function requireApiDatabaseIdentity(): Promise<AuthenticatedDatabaseIdentity> {
+  const environment = getServerEnvironment();
+  if (environment.dataSource !== 'neon') {
+    throw new AuthenticationRequiredError('Authenticated data access is unavailable in demo mode.');
+  }
+
+  return resolveAuthenticatedDatabaseIdentity(
+    await auth({ acceptsToken: 'session_token' }),
+    environment.clerkJwtTemplate,
+  );
+}

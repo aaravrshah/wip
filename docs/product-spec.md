@@ -1,7 +1,7 @@
 # Wip product specification
 
-Status: Milestone 0 baseline  
-Last updated: 2026-08-04  
+Status: implemented through Milestone 2A with later requirements retained
+Last updated: 2026-08-05
 Working name: Wip (not a legally cleared final name)
 
 ## 1. Product definition
@@ -55,7 +55,7 @@ An application is the user's record for one role at one employer. It can begin b
 
 A snapshot is an immutable preservation of the job-description content at a moment in time. For the MVP, “exact” means the captured job-description content and meaningful formatting are preserved as sanitized HTML plus plain text, together with source URL, capture time, page metadata, extraction version, and a content hash. Scripts, trackers, hidden page state, and unrelated navigation are excluded.
 
-This is a faithful semantic snapshot, not a pixel-perfect screenshot, WARC archive, or promise to reproduce the entire source page. Screenshots and full-page archives are postponed. Each recapture creates a new snapshot; an existing snapshot is never overwritten. The user previews extension captures before saving. Milestone 1 supports a manual pasted snapshot; Milestone 2 adds current-page capture.
+This is a faithful semantic snapshot, not a pixel-perfect screenshot, WARC archive, or promise to reproduce the entire source page. Screenshots and full-page archives are postponed. Each later recapture will create a new snapshot; an existing snapshot is never overwritten. Milestone 1 supports a manual pasted snapshot. Milestone 2A adds reviewed current-page capture for a new application; when a conservative URL/requisition duplicate exists, it opens that record without overwriting or attaching anything.
 
 ### Event and current stage
 
@@ -85,7 +85,7 @@ Today is the default signed-in screen and answers “What should I deal with now
 
 Later, **Needs your review** appears ahead of these sections for pending automated event proposals, each showing application, proposed change, source, confidence, and confirm/reject actions. This section is absent until Milestone 3.
 
-The screen includes quick actions for adding an application and adding a next action. Completing an action updates it in place and appends an auditable event. Empty states explain the next useful action and can load local development demo data only in a demo/development environment.
+The screen includes quick actions for adding an application and adding a next action. Completing or rescheduling an action updates that versioned operational record and immediately removes/reorders it in Today; action edits do not masquerade as application timeline events in 1B-3. Empty states explain the next useful action and can load local development demo data only in an explicitly selected demo/development environment.
 
 ### Applications table
 
@@ -106,18 +106,18 @@ On narrow screens, each row becomes a compact card with company, role, stage, an
 
 ### Optional Kanban view
 
-Kanban is postponed until the end of Milestone 1. When implemented, it is a second view over the same application query, never a separate source of truth. Columns correspond to the default stages and terminal outcomes. Archived applications are hidden by default; terminal columns may be collapsed.
+Milestone 1C implements Kanban as a second view over the same filtered application query and stage-change command, never a separate source of truth. It always renders all nine canonical stage columns, including useful empty-column messages. Archived applications remain outside the current UI. The table stays the default because it scales better and exposes dates and next actions.
 
-Dragging a card creates a confirmed manual status event and immediately updates the projection. Before saving an unusual backward or terminal transition, Wip asks for confirmation. Every drag operation has keyboard and menu equivalents, and users can always switch back to the table. The table is the default because it scales better and exposes dates and next actions.
+Dragging a card or choosing a stage from the card's labeled selector creates a confirmed manual status event and updates the event-derived projection. Wip asks for confirmation before backward and terminal transitions. The board reports pending, success, and error states; a rejected request returns the card to its server-backed stage. On narrow screens only the board region scrolls horizontally, avoiding page-level overflow.
 
 ### Application-detail screen
 
 The detail screen combines facts, evidence, and actions for one application:
 
-- **Header:** company, role, current stage/outcome, location, source URL, requisition ID, archive control, and primary action.
+- **Header:** company, role, current stage/outcome, location, source URL, requisition ID, edit control, and primary action. Archive/restore is later.
 - **Next action:** earliest incomplete action plus controls to add, reschedule, complete, or cancel actions.
-- **Timeline:** reverse-chronological by default, with an option for oldest-first. Each event shows what happened, occurrence time, source, confirmation state, and confidence when applicable. Pending automated proposals are visually distinct and do not alter current stage.
-- **Job description:** the active immutable snapshot with capture time, original URL, content hash indicator, and snapshot-version selector. The original source can be opened separately.
+- **Timeline:** complete and oldest-first in Milestone 1, showing what happened, effective occurrence time, server-recorded creation time, source, confirmation state, and confidence when applicable. Pending automated proposals are visually distinct and do not alter current stage.
+- **Job description:** the optional immutable snapshot with capture time, original URL, content hash indicator, and provenance. The manual flow accepts at most one pasted snapshot during creation; Milestone 2A can create the same shape from a reviewed extension capture. A later recapture/duplicate-attachment feature adds a snapshot-version selector.
 - **Documents used:** explicit resume, cover-letter, portfolio, or other document versions associated with the application.
 - **Contacts:** recruiter, referrer, interviewer, hiring manager, or other contacts, with optional minimal contact details.
 - **Notes:** user-authored context. Notes are not silently mined for sensitive attributes or aggregate statistics.
@@ -127,20 +127,22 @@ On mobile, these sections appear as a single readable column with timeline, next
 
 ## 4. MVP scope
 
-For planning purposes, the launch MVP spans Milestones 1 and 2: a manually useful web tracker plus intentional current-tab capture. Milestone 1 must be independently useful without the extension. Milestone 1A is a front-end-only vertical prototype using fictional seed data. Milestone 1B-1 introduces the read-only Neon PostgreSQL persistence foundation; Milestone 1B-2 adds Clerk authentication, empty authenticated owners, and strict Neon/PostgreSQL RLS while remaining read-only; Milestone 1B-3 adds manual mutations and production API commands.
+For planning purposes, the launch MVP spans Milestones 1 and 2: a manually useful web tracker plus intentional current-tab capture. Milestone 1 must be independently useful without the extension. Milestone 1A is a front-end-only vertical prototype using fictional seed data. Milestone 1B-1 introduces the read-only Neon PostgreSQL persistence foundation; Milestone 1B-2 adds Clerk authentication, empty authenticated owners, and strict Neon/PostgreSQL RLS while remaining read-only; Milestone 1B-3 adds manual application/fact/stage/note/action mutation commands, optional pasted snapshot creation, and permanent single-application deletion. Milestone 1C adds the board, contact and document-version metadata management, versioned export, and whole-tracker deletion.
+
+Milestone 1C completes the scoped core manual tracker. Milestone 2A adds user-invoked capture with no persistent site access: extract the active job page, review/edit locally, explicitly save a new application plus immutable snapshot, or open a conservative duplicate. Archive/restore, attaching additional snapshots, deployment/publication, and external-beta operations remain separate follow-up work. Clerk-account deletion remains intentionally separate from tracker-data deletion.
 
 ### Included in the MVP
 
 - Account sign-in with Clerk Google/passwordless email links and strict per-user data isolation in Milestone 1B-2.
-- Manual application create, edit, archive, and delete.
-- Manual immutable job-description snapshots, followed by extension capture in Milestone 2.
+- Manual application create, edit, and permanent delete; archive/restore remains later work.
+- Manual immutable job-description snapshots plus reviewed, user-invoked current-tab extension capture in Milestone 2A.
 - Manual chronological events and derived current stage.
-- Today, applications table, and application detail in Milestone 1A; Kanban at the end of Milestone 1.
+- Today, applications table, and application detail, plus the optional Milestone 1C Kanban view.
 - Document-version metadata and explicit application/document associations; file upload is not required.
-- Contacts, notes, and next actions.
+- Create, edit, link, and remove application contacts; create/edit logical document metadata, append immutable versions, and link/unlink exact versions used.
 - In-app due and overdue reminders; external push/email reminders are later.
 - Seeded fictional demo data for development, test, and product demonstration.
-- Basic user-data export and deletion paths before inviting real beta users.
+- Versioned full-tracker JSON export, applications CSV export, and authenticated tracker-data deletion before inviting real beta users.
 - Responsive and keyboard-accessible behavior.
 
 ### Later features
@@ -148,7 +150,7 @@ For planning purposes, the launch MVP spans Milestones 1 and 2: a manually usefu
 - Forwarded-email ingestion, extraction, confidence display, and approval workflow.
 - Browser, email, push, or calendar reminders.
 - Opt-in Hiring Pulse aggregates and cohort comparisons.
-- Richer capture adapters for specific applicant-tracking systems after the generic extractor is proven.
+- Richer capture adapters, create-anyway duplicate handling, and attaching a new confirmed snapshot to an existing application after the 2A generic extractor is proven.
 - Optional storage of document files; the default remains metadata-only.
 - Import from existing trackers and export formats beyond the baseline JSON/CSV set.
 - Calendar integration, contact enrichment, collaboration, and multi-user workspaces only if validated.
@@ -171,12 +173,13 @@ Wip will not provide the following in the scoped roadmap:
 ## 6. Functional rules
 
 - Application creation requires company and role; all other fields may be added later.
-- Applying is recorded as an event. `applied_at` shown in lists is a projection of the confirmed submission event, not an independently editable truth.
+- `applied_at` shown in lists is an event-derived projection. During 1B-3 creation, an optional applied date is preserved in the confirmed initial event payload; later manual submission events establish or correct it append-only.
 - Manual event occurrence time may be backdated. Creation time is always system-generated and retained separately.
 - Correcting history creates a correction/superseding record. Wip must not hide that the correction occurred.
 - One document version may be used by many applications. Replacing a document file or label creates a new version; it does not rewrite past uses.
 - A pending or rejected automated proposal cannot change Today counts, current stage, or aggregate contribution.
 - The extension runs only after a user gesture, shows a capture preview, and transmits only the reviewed job content and required metadata.
+- A failed extension save preserves the session draft for retry; success or cancellation clears it. A likely duplicate never silently overwrites or merges an existing record.
 - “Ghosting” must not be displayed as a definitive employer action until its definition, observation window, and caveats are approved.
 
 ## 7. Baseline success measures
@@ -197,5 +200,6 @@ Aggregate hiring outcomes are not an MVP success metric because aggregate contri
 The following remain open before later Milestone 1 or beta work; confirmed Milestone 1A decisions are recorded in `docs/decisions.md`:
 
 - public name and domain;
-- reminder defaults and timezone behavior; and
-- detailed Kanban terminal-column behavior for the end-of-Milestone-1 slice.
+- reminder defaults and timezone behavior;
+- archive/restore and snapshot-recapture behavior; and
+- production backup retention, beta geography, legal terms, and vendor review.

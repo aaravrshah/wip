@@ -21,7 +21,10 @@ export default async function TodayPage() {
     return <SignedOutLanding />;
   }
 
-  const applications = await applicationRepository.listApplications();
+  const [applications, timeZone] = await Promise.all([
+    applicationRepository.listApplications(),
+    applicationRepository.getTimeZone(),
+  ]);
   const referenceDate = applicationRepository.getReferenceDate();
 
   if (applications.length === 0) {
@@ -37,6 +40,8 @@ export default async function TodayPage() {
       overdue={getOverdueFollowUps(applications, referenceDate)}
       awaiting={getAwaitingResponses(applications)}
       recent={getRecentlyChanged(applications, 4)}
+      canManage={environment.dataSource === 'neon'}
+      timeZone={timeZone}
     />
   );
 }

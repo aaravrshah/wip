@@ -1,7 +1,7 @@
 # Wip privacy baseline
 
 Status: product and engineering requirements; not a public legal policy  
-Last updated: 2026-08-04
+Last updated: 2026-08-05
 
 ## 1. Privacy promise
 
@@ -29,11 +29,17 @@ Wip collects only what is needed for an enabled feature.
 - user-entered contacts, notes, and next actions; and
 - optional reminder settings.
 
+The manual tracker permits a user to paste employer-authored job-description text. The server converts it to normalized plain text plus escaped semantic HTML and stores provenance/hash metadata. It does not interpret that text as applicant profile data. Note and action inputs are private operational content; the UI explicitly warns against entering prohibited sensitive applicant data.
+
 The MVP stores document-version metadata, not resume or cover-letter file contents. A later file-upload feature requires a new retention and security review.
 
 ### Extension capture data
 
-After the user invokes the extension, Wip may read the current tab's URL, title, and selected job-description content. The extension sends a previewed job-content snapshot and required metadata to Wip only when the user saves it. It does not collect general browsing history or run persistent collection across sites.
+Only after the user clicks Wip, the extension temporarily reads the active HTTP(S) tab's source/canonical URL, page title, focused job-description HTML/text, and defensible job metadata such as role, company, location/workplace, employment type, salary text, and requisition ID. It records the local extractor version, selected source, per-field confidence/source, and warnings. The popup shows the exact source URL and editable review; no job content is sent until the user chooses Save.
+
+The extractor prefers `JobPosting` JSON-LD and focused job-description regions. It removes scripts, forms and form responses, event handlers, navigation, media/embeds, and unrelated page regions before review. It does not read employer cookies, authentication tokens, private messages, applicant-portal answers, other tabs, or browsing history. Server-side validation/sanitization is authoritative and the server computes the persisted content hash; browser input is never trusted as safe HTML.
+
+An unfinished capture is kept only in `chrome.storage.session` so the popup can recover from closure or a failed request. Wip clears it after a successful save or explicit cancellation, and Chrome clears session storage when the browser exits. Wip code requests a fresh Clerk session token only for a confirmed save, sends it in the authorization header, and never writes or logs that token. Clerk's supported extension SDK manages its own authentication session; its exact internal at-rest/session behavior and Native API abuse controls must be reviewed before external beta.
 
 ### Forwarded recruiting email, later
 
@@ -53,9 +59,9 @@ Clerk is the web authentication provider selected in Milestone 1B-2. Initial met
 
 Neon PostgreSQL is the operational system of record. The database receives only the tracker fields listed above plus the Clerk subject-to-internal-owner mapping; choosing Neon/Clerk does not expand tracker collection. Database connection strings and Clerk secret keys are server-only and must never be exposed to browser JavaScript, extension code, public environment variables, logs, fixtures, or screenshots. The Clerk publishable key is intentionally public but conveys no database privilege.
 
-Milestone 1B-2 maps a verified Clerk subject to an internal UUID, passes a short-lived Clerk JWT server-side to Neon, and enforces enabled/forced RLS using Neon's verified `auth.user_id()`. The normal passwordless database role has read-only table grants and cannot bypass RLS. Privileged seed/migration URLs are not used for authenticated requests. Missing or invalid authentication fails closed; an authenticated owner cannot see the fictional seed or another owner's rows even if an internal UUID is guessed.
+Milestone 1B-2 maps a verified Clerk subject to an internal UUID, passes a short-lived Clerk JWT server-side to Neon, and enforces enabled/forced RLS using Neon's verified `auth.user_id()`. Milestones 1B-3 and 1C give the normal passwordless database role only the column/table writes needed for implemented tracker commands. Milestone 2A's extension sends a normal short-lived Clerk session token only to the Wip capture API; after Clerk verifies it, the server obtains the separate custom Neon token internally. The extension never receives database credentials or the custom Neon JWT. The runtime role cannot bypass RLS or update/delete immutable events, snapshots, or document versions. Contact and document associations are protected by both same-owner foreign keys and owner policies. Privileged seed/migration URLs are never used for authenticated reads, writes, export, deletion, or extension capture. Missing or invalid authentication fails closed; an authenticated owner cannot read or mutate the fictional seed or another owner's rows even if an internal UUID is guessed.
 
-The product is still read-only and not deployed in this milestone. Database/auth integration tests must use a disposable branch and fictional test identities only. Before external beta, document Neon backup/branch deletion behavior, Clerk deletion/session retention, production Google OAuth configuration, and both vendors' privacy/subprocessor terms.
+The product now supports manual authenticated tracker writes and user-confirmed extension capture but is not deployed or published by this milestone. The explicit fictional demo remains read-only. Database/auth integration tests must use a disposable branch and fictional test identities only. Before external beta, document Neon backup/branch deletion behavior, Clerk deletion/session/Native API retention and abuse controls, production Google OAuth configuration, and both vendors' privacy/subprocessor terms.
 
 ## 3. Data Wip does not collect
 
@@ -141,7 +147,7 @@ Every aggregate surface must display a plain-language caveat about opt-in select
 - Clerk determines whether a request has a valid user session; it does not decide which tracker rows are visible. Neon verifies Clerk's JWT against its configured JWKS/audience, and PostgreSQL policies authorize the mapped internal owner.
 - New authenticated owners start empty. The twelve fictional demo records are never copied into a new account and have no Clerk identity mapping.
 - Support access is deny-by-default, time-limited, audited, and used only with the user's authorization or for documented security/legal necessity.
-- The extension uses temporary `activeTab` access after a user gesture and a narrow Wip API origin. It does not request `<all_urls>`, cookies, browsing history, or network interception.
+- The extension uses temporary `activeTab` access after a user gesture, packaged `scripting`, session-only draft `storage`, and exact Wip API/Clerk Frontend API host patterns. It does not request `<all_urls>`, `tabs`, `identity`, cookies, browsing history, network interception, downloads, or persistent content-script matches.
 - Email workers, extractors, and analytics jobs use separate credentials with access only to their required queue, storage prefix, schema, or endpoint.
 - Raw email object storage is private, encrypted, not CDN-cached, and protected by explicit object deletion plus an expiry rule.
 
@@ -149,7 +155,7 @@ Every aggregate surface must display a plain-language caveat about opt-in select
 
 | Data | Baseline retention |
 | --- | --- |
-| Active tracker records and snapshots | Until the user deletes the application/account, subject to disclosed backups. |
+| Active tracker records and snapshots | Until the user deletes the application or all tracker data, subject to disclosed backups. |
 | Rejected automated proposals | Retained with minimal provenance for audit until application/account deletion; user-facing delete controls may remove sooner. |
 | Raw forwarded email after successful extraction | Delete immediately after safe structured persistence; target within 24 hours. |
 | Raw forwarded email when processing fails | Private retry window, maximum seven days plus documented lifecycle-processing delay, then delete. |
@@ -163,7 +169,7 @@ Retention periods are product requirements, not permission to keep data merely b
 
 ## 8. Export
 
-Users can request a machine-readable export without contacting support. The baseline export includes:
+Milestone 1C lets an authenticated user request a machine-readable export without contacting support. The versioned JSON baseline includes:
 
 - applications and projection fields;
 - job-description snapshot HTML/text and provenance;
@@ -171,13 +177,15 @@ Users can request a machine-readable export without contacting support. The base
 - document-version metadata and application associations;
 - contacts, notes, and next actions;
 - settings; and
-- consent history.
+- consent history when that later feature exists.
 
-JSON is the lossless baseline. CSV may be offered for applications, events, actions, and document uses. Exports are generated into short-lived private storage, require fresh authorization to download, and expire automatically. Export activity is audited without logging export contents.
+JSON uses a documented `wip.tracker.export` envelope and format version. It omits internal owner IDs, Clerk subjects, tokens, and credentials. The optional applications CSV is a convenient projection rather than a lossless export and neutralizes cells that could otherwise be interpreted as spreadsheet formulas. Both are generated for the verified owner and streamed directly in the response; Wip does not create or retain a server-side export file in this milestone. Response caching is disabled. A future asynchronous large-export design would require private expiring storage and fresh authorization.
 
 ## 9. Deletion
 
-Users can delete an individual application or their account. The UI must explain scope and any recovery window before confirmation.
+Milestone 1B-3 implements permanent individual-application deletion from Application Detail. It requires typing the exact company or role, derives the owner from the verified session, returns not found for inaccessible IDs, and cascades through current database children. Milestone 1C additionally implements whole-tracker deletion after the user types `DELETE MY WIP DATA`. A zero-argument database function derives the internal owner from Neon's verified JWT and transactionally deletes only that owner's applications, documents, contacts, and dependent records, then resets tracker preferences. It retains the minimal internal Clerk-subject mapping so the independently managed Clerk authentication account remains signed in and can show a clean empty tracker.
+
+Neither deletion path has a recovery UI or soft-delete window. The Data & Privacy screen explicitly distinguishes tracker deletion from Clerk-account deletion. Clerk-account deletion remains unimplemented and must not be implied by deleting tracker data.
 
 Deletion covers:
 
@@ -187,7 +195,7 @@ Deletion covers:
 4. private aggregate contribution facts linked through the restricted deletion map; and
 5. refreshed aggregate outputs.
 
-Account deletion also removes the auth identity after dependent data deletion is successfully scheduled. If a short recovery window is offered, data must be inaccessible during that window and hard deletion must occur automatically at its end. Backups age out on the disclosed provider schedule; restored backups must reapply deletion tombstones before serving traffic.
+Future Clerk-account deletion also removes the auth identity after dependent data deletion is successfully scheduled. Backups may retain deleted bytes until Neon's configured/provider retention window expires; the exact production window is unresolved and must be disclosed before external beta. A restored backup must reapply deletion records before serving traffic.
 
 ## 10. Consent withdrawal
 
@@ -224,4 +232,4 @@ Security incidents involving raw email, snapshots, contacts, notes, or authentic
 - model provider and zero-retention/training controls;
 - whether explicitly saved original email is needed at all;
 - approved aggregate thresholds and allowable cohort dimensions; and
-- whether any recovery window should follow application or account deletion.
+- whether future Clerk-account deletion should have a recovery window (application and tracker-data deletion have none).

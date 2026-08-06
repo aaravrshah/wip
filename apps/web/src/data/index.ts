@@ -1,4 +1,4 @@
-import { requireAuthenticatedDatabaseIdentity } from '@/auth/server';
+import { requireApiDatabaseIdentity, requireAuthenticatedDatabaseIdentity } from '@/auth/server';
 import { getServerEnvironment } from '@/env/server';
 
 import { createAuthenticatedNeonApplicationRepository } from './neon-application-repository';
@@ -16,6 +16,17 @@ async function getRepository(): Promise<ApplicationRepository> {
   });
 }
 
+export async function createApplicationRepositoryForApiRequest(): Promise<ApplicationRepository> {
+  const environment = getServerEnvironment();
+  if (environment.dataSource === 'demo') return demoApplicationRepository;
+
+  const identity = await requireApiDatabaseIdentity();
+  return createAuthenticatedNeonApplicationRepository({
+    authenticatedDatabaseUrl: environment.authenticatedDatabaseUrl,
+    databaseToken: identity.databaseToken,
+  });
+}
+
 // Demo selection is explicit and cannot silently activate in production. Authenticated
 // repositories are intentionally request-local so a Clerk JWT or owner scope is never cached
 // across users in a long-lived Next.js process.
@@ -25,6 +36,15 @@ export const applicationRepository: ApplicationRepository = {
   },
   async getApplicationById(id) {
     return (await getRepository()).getApplicationById(id);
+  },
+  async listContacts() {
+    return (await getRepository()).listContacts();
+  },
+  async listDocuments() {
+    return (await getRepository()).listDocuments();
+  },
+  async getTimeZone() {
+    return (await getRepository()).getTimeZone();
   },
   getReferenceDate() {
     const environment = getServerEnvironment();

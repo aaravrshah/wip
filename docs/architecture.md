@@ -1,7 +1,7 @@
 # Wip recommended architecture
 
-Status: accepted through Milestone 1B-2
-Last updated: 2026-08-04  
+Status: accepted through Milestone 2A
+Last updated: 2026-08-05
 Decision horizon: optimize Milestones 1–2; preserve clean boundaries for Milestones 3–4
 
 ## 1. Recommendation
@@ -13,7 +13,7 @@ Use a TypeScript monorepo with four explicit product boundaries, but deploy only
 3. **Inbound-email processing:** a separate Cloudflare Email Worker, private R2 transient storage, and queue consumer added in Milestone 3.
 4. **Aggregate analytics:** isolated Postgres schemas and scheduled derivation jobs added in Milestone 4; move to a warehouse only when scale or query isolation justifies it.
 
-Use pnpm workspaces for dependency management and Turborepo for dependency-aware tasks/cache. Keep shared domain contracts, validation, database access, API client, and UI primitives in packages once each boundary provides clear value. `packages/database` owns Drizzle schema, migrations, Neon clients, and seed logic; Clerk/session integration and the application-facing repository contract stay in `apps/web`. Milestone 1B-2 adds no extension, email, analytics, mutation, or deployment scaffolding.
+Use pnpm workspaces for dependency management and Turborepo for dependency-aware tasks/cache. Keep shared domain contracts, validation, database access, API client, and UI primitives in packages once each boundary provides clear value. `packages/database` owns Drizzle schema, migrations, Neon clients, and seed logic; `packages/schemas` owns serialized command validation shared by web and extension; Clerk/server session integration, request-local command services, export/deletion orchestration, and the application-facing repository contract stay in `apps/web`. Milestone 2A adds `apps/extension` but no email, analytics, file, publication, or deployment scaffolding.
 
 The recommendation favors a solo developer's delivery speed, managed free/low-cost starting tiers, portable PostgreSQL data, and the ability to split heavy workers later. Pricing changes frequently; verify current plan terms before provisioning rather than encoding numeric cost promises here.
 
@@ -25,6 +25,7 @@ flowchart LR
     User --> Extension["MV3 extension\nuser-invoked capture"]
     WebUI --> WebAPI["Next.js web/API\nsystem of record"]
     Extension -->|"reviewed snapshot over /api/v1"| WebAPI
+    Extension -->|"standalone Native API session"| Auth
     WebAPI --> DB["Neon PostgreSQL\nsystem of record"]
     Auth["Clerk\nGoogle + email links"] -->|"verified session + custom JWT"| WebAPI
     Auth -->|"JWKS"| DB
@@ -51,7 +52,7 @@ No browser client can read `analytics_private`, raw email storage, or service cr
 wip/
 ├── apps/
 │   ├── web/                    # Milestone 1: Next.js responsive app and /api/v1
-│   ├── extension/              # Milestone 2: WXT Manifest V3 extension
+│   ├── extension/              # Milestone 2A: WXT/React Manifest V3 extension
 │   └── email-ingest/           # Milestone 3: Cloudflare email + queue worker
 ├── packages/
 │   ├── api-client/             # Later: typed HTTP client when a real API exists
@@ -69,7 +70,7 @@ wip/
 └── turbo.json
 ```
 
-Milestone 1B-2 keeps the existing packages and adds Clerk/session code only inside `apps/web`; authentication is not a cross-runtime shared package yet. The remaining shown directories describe later target boundaries, not required empty scaffolds. Do not add `apps/extension` until Milestone 2 or `apps/email-ingest` until Milestone 3. Aggregate derivation can begin as migrations/database functions plus scheduled jobs; add a separate `apps/analytics-worker` only if the work cannot safely fit a short idempotent database or server job.
+Milestone 1B-3 added `packages/schemas`; Milestone 1C extended it with contacts/documents/export/deletion, and Milestone 2A adds the strict extension capture request/response contract. The extension's tiny fetch client remains beside the popup because it has only one consumer; authentication is not a cross-runtime shared package. The remaining shown directories describe later target boundaries, not required empty scaffolds. Do not add `apps/email-ingest` until Milestone 3. Aggregate derivation can begin as migrations/database functions plus scheduled jobs; add a separate `apps/analytics-worker` only if the work cannot safely fit a short idempotent database or server job.
 
 ## 4. Current options considered
 
@@ -93,7 +94,7 @@ Official references: [Next.js App Router](https://nextjs.org/docs/app), [Next.js
 | Supabase Postgres + Auth | Full PostgreSQL with integrated passwordless/social auth and RLS-aware JWT integration. | Couples the database and auth platform; inactive free projects can require restoration behavior that the owner does not want for this project. | **Superseded.** Retained for decision history; do not add new Supabase dependencies or project structure. |
 | SQLite/server-local database | Very cheap and simple locally. | Multi-device accounts, serverless deployment, concurrency, backups, RLS, and later worker access require an early migration. | Development fixture only, not the product database. |
 
-Neon's serverless driver provides HTTP and WebSocket transports. Wip uses HTTP for current one-shot reads and supplies Clerk's custom JWT through the driver's `authToken` option. Neon validates it against the configured Clerk JWKS and exposes the verified subject through `auth.user_id()`. Runtime requests use the passwordless pooled `authenticated@` URL; privileged seed tooling uses `DATABASE_URL`; drizzle-kit alone uses the direct `DIRECT_DATABASE_URL`. An interactive write transaction requirement must trigger a deliberate driver review. Official references: [Neon serverless driver](https://neon.com/docs/serverless/serverless-driver), [Neon RLS](https://neon.com/docs/guides/row-level-security), [Neon project RLS settings](https://neon.com/docs/manage/projects), [Clerk Next.js auth](https://clerk.com/docs/reference/nextjs/app-router/auth), [Clerk JWT templates](https://clerk.com/docs/guides/sessions/jwt-templates), [Clerk sign-in methods](https://clerk.com/docs/guides/configure/auth-strategies/sign-up-sign-in-options), and [Drizzle with Neon](https://orm.drizzle.team/docs/get-started/neon-new).
+Neon's serverless driver provides HTTP and WebSocket transports. Wip uses HTTP for request-local reads and writes and supplies Clerk's custom JWT through the driver's `authToken` option. Drizzle's Neon HTTP `batch` API sends the fixed statements of a command as one non-interactive transaction, which is sufficient for application creation and event/projection writes without adding a WebSocket session. If a later command requires interactive branching between statements, review the transport deliberately rather than mixing transaction models. Neon validates the JWT against the configured Clerk JWKS and exposes the verified subject through `auth.user_id()`. Runtime requests use the passwordless pooled `authenticated@` URL; privileged seed tooling uses `DATABASE_URL`; drizzle-kit alone uses the direct `DIRECT_DATABASE_URL`. Official references: [Neon serverless driver and transactions](https://neon.com/docs/serverless/serverless-driver), [Drizzle batch API](https://orm.drizzle.team/docs/batch-api), [Neon RLS](https://neon.com/docs/guides/row-level-security), [Clerk Next.js auth](https://clerk.com/docs/reference/nextjs/app-router/auth), [Clerk JWT templates](https://clerk.com/docs/guides/sessions/jwt-templates), and [Drizzle with Neon](https://orm.drizzle.team/docs/get-started/neon-new).
 
 ### Monorepo tooling
 
@@ -109,7 +110,7 @@ Official references: [pnpm workspaces](https://pnpm.io/workspaces), [Turborepo c
 
 | Option | Advantages | Costs / risks | Decision |
 | --- | --- | --- | --- |
-| WXT + React popup | Generates extension entrypoints/manifests, supports MV3 and TypeScript, provides development/reload tooling, and still uses standard Chrome APIs. | Adds a framework abstraction and multi-browser features that Wip may not immediately use. | **Recommend** for Milestone 2, while keeping extraction/domain code framework-independent. |
+| WXT + React popup | Generates extension entrypoints/manifests, supports MV3 and TypeScript, provides development/reload tooling, and still uses standard Chrome APIs. | Adds a framework abstraction and multi-browser features that Wip may not immediately use. | **Selected for Milestone 2A.** Extraction stays a serializable framework-independent function with checked-in fictional fixtures. |
 | Plain MV3 + Vite | Smallest dependency surface and closest to Chrome documentation. | More custom build, manifest-per-environment, asset, reload, and test wiring for one developer. | Good fallback if WXT proves limiting. |
 
 WXT describes itself as an open-source web-extension framework and explicitly leaves extension API behavior to the platform. Chrome requires MV3 service workers and forbids remotely hosted executable code. Official references: [WXT introduction](https://wxt.dev/guide/introduction.html), [Chrome Manifest V3](https://developer.chrome.com/docs/extensions/develop/migrate/what-is-mv3), and [Chrome Scripting API](https://developer.chrome.com/docs/extensions/reference/api/scripting).
@@ -138,7 +139,7 @@ At production maturity, `apps/web` owns:
 - export/deletion orchestration; and
 - read models for Today, table/Kanban, and application detail.
 
-Milestone 1A implemented the responsive screens and read-oriented application boundary over fictional seed data. Milestone 1B-1 added the server-only Neon repository. Milestone 1B-2 adds Clerk authentication, internal owner provisioning, and RLS while keeping the application read-only. `/api/v1`, export/deletion orchestration, and write commands begin in Milestone 1B-3. The data source is selected explicitly; demo data may be used only through deliberate demo configuration and never silently in production.
+Milestone 1A implemented the responsive screens and read-oriented application boundary over fictional seed data. Milestone 1B-1 added the server-only Neon repository. Milestone 1B-2 added Clerk authentication, internal owner provisioning, and read RLS. Milestone 1B-3 added manual tracker mutations, a versioned HTTP boundary, narrow write RLS, and permanent single-application deletion. Milestone 1C added Kanban through the same stage command, contacts, metadata-only document versions/uses, direct versioned export, and transactionally deleting all tracker data. Milestone 2A adds the authenticated extension capture command while reusing that request-local command/RLS path. Archive/restore, additional snapshot attachment, deployment, and Clerk-account deletion remain postponed. The data source is selected explicitly; demo data may be used only through deliberate demo configuration and never silently in production.
 
 Use Next.js Route Handlers for the stable external API because Server Actions are coupled to the web build and are not the right contract for an extension or worker. Web server components may call the same domain/application services directly, but there must be one implementation of each command rule.
 
@@ -153,29 +154,40 @@ GET    /api/v1/applications/:applicationId
 PATCH  /api/v1/applications/:applicationId
 DELETE /api/v1/applications/:applicationId
 POST   /api/v1/applications/:applicationId/events
-POST   /api/v1/applications/:applicationId/snapshots
-POST   /api/v1/events/:eventId/confirm
-POST   /api/v1/events/:eventId/reject
+POST   /api/v1/applications/:applicationId/notes
+PATCH  /api/v1/applications/:applicationId/notes/:noteId
+DELETE /api/v1/applications/:applicationId/notes/:noteId
 POST   /api/v1/applications/:applicationId/actions
-PATCH  /api/v1/actions/:actionId
-POST   /api/v1/extension/captures
-GET    /api/v1/export
-DELETE /api/v1/account
+PATCH  /api/v1/applications/:applicationId/actions/:actionId
+DELETE /api/v1/applications/:applicationId/actions/:actionId
+POST   /api/v1/applications/:applicationId/contacts
+PATCH  /api/v1/applications/:applicationId/contacts/:associationId
+DELETE /api/v1/applications/:applicationId/contacts/:associationId
+POST   /api/v1/applications/:applicationId/documents
+PATCH  /api/v1/applications/:applicationId/documents/:documentId
+DELETE /api/v1/applications/:applicationId/document-uses/:useId
+POST   /api/v1/captures
+GET    /api/v1/tracker/export?format=json|csv
+DELETE /api/v1/tracker
 ```
 
-Nested document, contact, and note endpoints can follow the same ownership pattern. Mutating requests accept an idempotency key where retries are plausible. Do not expose arbitrary event payload writes; accept a discriminated, validated command schema per event type.
+This is the implemented surface through Milestone 2A. Contact and document commands retain the Milestone 1C behavior. `POST /api/v1/captures` accepts one reviewed extension capture, creates a new application/confirmed initial event/immutable snapshot through the existing command service, or returns a typed owner-scoped duplicate without writing. Direct snapshot attachment/recapture, event proposal confirmation/rejection, and Clerk-account deletion remain later additions. Application creation may include one optional manually pasted snapshot. Create, stage-event, and capture requests require an `Idempotency-Key`; other mutations use explicit row versions where stale overwrites are possible. Do not expose arbitrary event payload writes; accept a discriminated, validated command schema per event type.
+
+Exports stream directly from an owner-scoped read service: JSON uses the versioned `wip.tracker.export` envelope and CSV contains the applications projection with spreadsheet-formula prefixes neutralized. Wip does not persist export artifacts. Whole-tracker deletion requires the exact phrase `DELETE MY WIP DATA` and calls a zero-argument `SECURITY DEFINER` database function. The function derives the current owner from Neon's verified JWT, deletes applications/documents/contacts in one database transaction, resets tracker preferences, and retains only the owner-to-Clerk mapping so the independent authentication account remains usable.
+
+Unsafe cookie-authenticated web requests require an exact matching `Origin`, reject non-`same-origin` Fetch Metadata when present, and accept JSON only where a body is expected. Extension capture instead requires a syntactically valid Bearer header, Clerk's verified normal `session_token`, an exact `chrome-extension://` origin from `WIP_EXTENSION_ORIGINS`, and reflected non-wildcard CORS/preflight headers. The server bounds the streamed JSON body, validates strict Zod command schemas, derives identity only from Clerk, and returns stable `{ error: { code, message, fields? } }` bodies. Routes are thin adapters; reusable command services own persistence rules.
 
 ### Domain and persistence rules
 
 - Put event taxonomy, stage reduction, confirmation policy, due/stale calculations, and aggregate eligibility into pure functions in `packages/domain`.
 - Put serializable input/output schemas in `packages/schemas` using a runtime validator such as Zod.
 - Define the PostgreSQL model in `packages/database` with Drizzle's TypeScript schema and generate reviewable SQL migrations with drizzle-kit. Check both the schema and generated SQL into source control. Production changes run `drizzle-kit migrate`; automatic schema pushing is not a production strategy.
-- Perform event insertion, confirmation audit, and projection update transactionally.
-- Every user-owned table has a non-null `owner_id`; composite keys prevent cross-owner relationships and repository predicates provide defense in depth. All 11 owner/identity tables enable and force RLS. Policies compare `owner_id` with the internal UUID returned by `wip_current_owner_id()`, which maps only the Neon-verified `auth.user_id()` Clerk subject.
-- Authenticated web requests never accept `owner_id` or auth subject as caller input. Their request-local repository gets a Clerk custom JWT server-side and connects with `NEON_AUTHENTICATED_DATABASE_URL`. The passwordless `authenticated` role is `NOBYPASSRLS`, has SELECT on current tables, and can execute only the zero-argument owner-provision function.
+- Perform initial application/event/snapshot/action insertion and stage-event/projection updates atomically with Neon HTTP/Drizzle batch transactions. Preserve user-supplied `occurred_at` separately from database `created_at`.
+- Every user-owned table has a non-null `owner_id`; composite keys prevent cross-owner relationships and repository predicates provide defense in depth. All 11 owner/identity tables enable and force RLS. The ten owned-table policies compare `owner_id` with the internal UUID returned by `wip_current_owner_id()`; the `owners` policy compares its Clerk subject directly with Neon-verified `auth.user_id()`.
+- Authenticated web requests never accept `owner_id` or auth subject as caller input. Their request-local repository/command service gets a Clerk custom JWT server-side and connects with `NEON_AUTHENTICATED_DATABASE_URL`. The passwordless `authenticated` role is `NOBYPASSRLS`; it retains SELECT, can execute only the zero-argument provisioning and tracker-deletion functions, and has operation/column grants only for implemented commands. Immutable events and snapshots receive INSERT but no UPDATE/DELETE grant; immutable document versions receive INSERT but no UPDATE/DELETE grant.
 - `DATABASE_URL`, `DIRECT_DATABASE_URL`, `CLERK_SECRET_KEY`, and privileged database access are server-only. `DATABASE_URL` is seed-only, `DIRECT_DATABASE_URL` is migration-only, and neither is normal web runtime configuration. No database URL or secret can use a `NEXT_PUBLIC_` prefix, enter a browser bundle, or be sent to the extension.
 - The JWT is supplied per Neon HTTP request, so verified identity is not stored in a caller-controlled PostgreSQL setting or a reusable pooled SQL session. Missing, malformed, expired, wrong-audience, or otherwise invalid tokens fail closed at Clerk/Neon before data is returned.
-- Before implementing multi-statement write transactions in 1B-3, verify the driver/ORM transaction path and centralize all writes in authorization-aware commands.
+- Application and editable child versions provide stale-write detection. Create/stage idempotency keys are owner-unique, and the stage projector orders confirmed events by effective time, server creation time, and stable event ID.
 
 ## 6. Extension capture layer
 
@@ -185,25 +197,26 @@ Nested document, contact, and note endpoints can follow the same ownership patte
 2. `activeTab` grants temporary access; the service worker uses `chrome.scripting.executeScript` in the main frame.
 3. The extractor finds likely job-description content using semantic elements, JSON-LD `JobPosting`, and bounded generic heuristics. Site-specific adapters are optional and isolated.
 4. The popup shows title, company, location, source URL, and captured description with warnings for missing/ambiguous fields.
-5. The user edits/selects the target application or chooses “new application,” then saves.
-6. The extension sends validated capture data to the narrow Wip API origin. The server sanitizes again, hashes canonical content, and inserts the application/snapshot transactionally.
-7. The extension clears transient page content from local/session storage after success or explicit cancel.
+5. The user edits company, role, location, canonical stage, and optional metadata, then explicitly saves.
+6. The extension sends the reviewed capture to the exact Wip API origin with an on-demand Clerk session token and idempotency key. The server validates and sanitizes again, hashes normalized text, and inserts the application, confirmed extension event, and immutable snapshot in one Neon HTTP batch transaction.
+7. A conservative existing URL or requisition/company match returns a typed duplicate and an open-existing action; it never overwrites or appends a snapshot in 2A.
+8. The extension clears transient page content from `chrome.storage.session` after success or explicit cancel. A recoverable error preserves the reviewed draft for retry.
 
 Do not use a persistent content script across all pages, monitor navigation, scrape results pages in bulk, or access browser cookies. Extraction failure should allow manual selection/paste rather than escalating permission scope.
 
 ### Anticipated Chrome permissions
 
-| Permission / manifest field | Stage | Why it is needed | Constraint |
+| Permission / manifest field | 2A status | Why it is needed | Constraint |
 | --- | --- | --- | --- |
 | `activeTab` | Required M2 | Temporarily read the current page after the user invokes Wip. Chrome documents it as an alternative to persistent `<all_urls>` access. | Access lasts only for the invoked tab/origin and ends on navigation/close. |
 | `scripting` | Required M2 | Run the packaged extractor in the active tab. | Execute only after a user gesture; main frame by default. |
 | `storage` | Required M2 | Keep settings, short-lived auth/session state, and an unsent capture draft. | Do not use as a second tracker or permanent job-description archive; clear page content promptly. |
-| Narrow `host_permissions` for the Wip API, e.g. `https://app.example.com/*` | Required M2 | Allow extension pages/service worker to call the system-of-record API. | Replace placeholder with exactly the production/preview API origins; never use `https://*/*`. |
-| `identity` | Likely M2 | Use `chrome.identity.launchWebAuthFlow` for a user-initiated, non-Google or Google OAuth flow and receive a redirect safely. | Store only revocable scoped credentials; final auth design is an unresolved M2 decision. |
+| Exact `host_permissions` for `WXT_WIP_API_ORIGIN` | Required | Allow the popup to call the system-of-record capture API. | One configured `http(s)` origin plus `/*`; no wildcard host or unrelated app host. |
+| Exact `host_permissions` for `WXT_CLERK_FRONTEND_API_ORIGIN` | Required | Allow Clerk's supported extension SDK to create/refresh the standalone Native API session. | One configured Clerk Frontend API origin plus `/*`; the Clerk secret key is never present. |
 | `notifications` / `alarms` | Optional later | Deliver opt-in local reminders if that channel is selected. | Request at runtime when enabling the feature, not at install. |
 | `contextMenus` | Optional later | Add a user-invoked “Save job to Wip” context action. | Add only if user research supports it. |
 
-Do not request `tabs`, `history`, `cookies`, `webRequest`, `declarativeNetRequest`, `downloads`, `unlimitedStorage`, broad `content_scripts.matches`, or `<all_urls>` for the planned capture flow. `activeTab` already permits the needed tab URL/title and temporary script access. Chrome's permissions guidance recommends optional permissions where possible. References: [activeTab](https://developer.chrome.com/docs/extensions/develop/concepts/activeTab), [Scripting API permissions](https://developer.chrome.com/docs/extensions/reference/api/scripting), [Storage API](https://developer.chrome.com/docs/extensions/reference/api/storage), [Identity API](https://developer.chrome.com/docs/extensions/reference/api/identity), and [declaring/optional permissions](https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions).
+Do not request `tabs`, `identity`, `history`, `cookies`, `webRequest`, `declarativeNetRequest`, `downloads`, `unlimitedStorage`, broad `content_scripts.matches`, or `<all_urls>` for 2A. `activeTab` already permits the needed tab URL/title and temporary script access. A source and built-manifest test fail if this boundary broadens. References: [activeTab](https://developer.chrome.com/docs/extensions/develop/concepts/activeTab), [Scripting API permissions](https://developer.chrome.com/docs/extensions/reference/api/scripting), [Storage API](https://developer.chrome.com/docs/extensions/reference/api/storage), and [declaring/optional permissions](https://developer.chrome.com/docs/extensions/develop/concepts/declare-permissions).
 
 ### Authentication
 
@@ -211,7 +224,9 @@ Clerk is the web identity provider. Initial methods are Google and passwordless 
 
 Clerk's immutable `sub` is stored once on the provider-neutral internal owner. First authenticated access calls `wip_provision_owner()` with no arguments; the security-definer function reads only Neon-verified `auth.user_id()` and returns the existing/new internal UUID. A unique Clerk-subject index makes retries and concurrent first requests idempotent. New owners remain empty, and the seed owner has no auth subject.
 
-At the start of Milestone 2, threat-model a user-initiated `launchWebAuthFlow`, a short-lived access token, and a revocable extension credential scoped to the Wip API. Store access tokens in `chrome.storage.session`; if a refresh credential must persist, minimize its scope and rotate it. Never copy a web session cookie or request the `cookies` permission. Reference: [Chrome Identity API](https://developer.chrome.com/docs/extensions/reference/api/identity).
+Milestone 2A uses `@clerk/chrome-extension` in standalone popup mode (`standardBrowser={false}`). Clerk's current matrix supports email OTP/password/passkey in this mode but not OAuth or email-link redirects. Wip therefore requires the developer to enable Clerk Native API and email verification code; Google/email-link sign-in remains available on the web. The popup calls `getToken({ skipCache: true })` only when the user confirms Save and sends the normal Clerk session token as `Authorization: Bearer`; Wip code never writes or logs that JWT. The capture Route Handler uses `auth({ acceptsToken: 'session_token' })`, then requests the existing custom `neon` token server-side for RLS. The caller never sees the Neon JWT or a database URL.
+
+Clerk's Sync Host would share web authentication, but its documented manifest requires `cookies`. That conflicts with C-040, so Sync Host is not configured and opening web sign-in does not silently synchronize the extension session. Before external beta, verify the SDK's internal session-at-rest behavior, Native API abuse controls, revocation/sign-out behavior, and the production extension's stable CRX ID/allowed origin. References: [Clerk Chrome Extension SDK](https://clerk.com/docs/reference/chrome-extension/overview), [Native API setup](https://clerk.com/docs/guides/development/deployment/chrome-extension), [Sync Host](https://clerk.com/docs/guides/sessions/sync-host), and [Clerk-authenticated Next.js Route Handlers](https://clerk.com/docs/reference/nextjs/app-router/route-handlers).
 
 ## 7. Inbound-email processing
 
@@ -274,12 +289,35 @@ PostgreSQL is adequate for early batch aggregates. Move private facts to a dedic
 - Use `NEON_AUTHENTICATED_DATABASE_URL` only for request-time authenticated reads. Keep `DATABASE_URL` limited to seed tooling and `DIRECT_DATABASE_URL` limited to migrations.
 - Preserve the explicit local/test demo and read-only product. Do not add mutations, `/api/v1`, deployment, or real-user beta data in this slice.
 
-### Milestone 1B-3 and later
+### Milestone 1B-3
 
-- Add `/api/v1`, transactionally safe commands, export/deletion behavior, and isolated preview/production environments.
+- Add the implemented `/api/v1` application, event, note, and next-action routes; transactionally safe create/stage commands; optional manual semantic snapshot; permanent confirmed application deletion; and narrow write policies/grants.
+- Keep the explicit demo read-only. Do not use `DATABASE_URL` or `DIRECT_DATABASE_URL` for real-user mutations.
+- Postpone export, archive/restore, Kanban, snapshot recapture, document/contact management, and environment/deployment work to separately authorized slices.
+
+### Milestone 1C
+
+- Add a Table/Board switch over one repository result. The table remains default; the board uses native drag-and-drop plus a labeled per-card selector and the existing transactional stage-event command.
+- Add owner-scoped contact/association and logical-document/version/use commands. Keep document versions append-only and document contents out of the database.
+- Generate versioned JSON and applications CSV directly from owner-scoped reads without creating stored export objects.
+- Delete all tracker data through a zero-argument owner-derived database function after exact-phrase confirmation; keep Clerk-account deletion separate.
+- Extend forced RLS, cross-owner constraints, and narrow grants only for this surface. Keep demo mode read-only.
+- Continue to postpone archive/restore, snapshot recapture, deployment, extension, email, Hiring Pulse, uploads, billing, and production beta admission.
+
+### Milestone 2A
+
+- Add `apps/extension`, shared capture schemas, `POST /api/v1/captures`, and a development-only fictional capture page.
+- Keep page access user-invoked/current-tab-only and temporary; keep all persistent writes in the web/Neon system of record.
+- Configure the unpacked extension ID explicitly in Clerk allowed origins and `WIP_EXTENSION_ORIGINS`; do not wildcard CORS.
+- Build an unpacked and ZIP artifact locally and scan the built files/manifest for secret/database markers and broad permissions.
+- Continue to postpone Web Store publication, stable production CRX identity, deployment, broad ATS adapters, duplicate override/snapshot attachment, background detection, email, Hiring Pulse, uploads, and production beta admission.
+
+### Later
+
+- Add isolated preview/production environments and any Clerk-account deletion workflow only in an explicitly scoped milestone.
 - Production initially remains one Vercel web deployment and one Neon project/database, with separate branches or projects where isolation requires them. Set spend alerts and review function/database/storage usage monthly.
 
-- Milestone 2 adds Chrome Web Store packaging/signing and extension environment manifests.
+- Milestone 2B may prepare stable production identity and store-ready packaging; publishing/signing still requires explicit authorization.
 - Milestone 3 adds one Cloudflare worker, one private R2 bucket with lifecycle rules, and one queue/dead-letter queue.
 - Milestone 4 adds scheduled analytics jobs and restricted schemas, not a warehouse by default.
 
@@ -327,17 +365,28 @@ Milestone 1B-2 gate (resolved 2026-08-04):
 - enable and force RLS for every owner/identity table; use a passwordless, `NOBYPASSRLS`, read-only authenticated role; and
 - keep the product read-only and the demo source explicit.
 
-Before Milestone 1B-3:
+Milestone 1B-3 gate (resolved 2026-08-05):
 
-- choose a transaction-capable driver path for write commands;
-- define the real API command boundary and deletion/export implementation; and
-- add write-side RLS policies only alongside tested command semantics and strict ownership checks.
+- use Neon HTTP/Drizzle batch transactions for fixed multi-statement commands and retain the Clerk JWT-authenticated path for every real-user write;
+- expose only the versioned application, manual-stage, note, next-action, and confirmed deletion commands in this slice;
+- require same-origin JSON mutation requests, bounded strict schemas, stable errors, create/event idempotency, and row versions for stale-write protection;
+- add narrow write RLS and grants without permitting event or snapshot updates/deletes; and
+- keep demo mode explicitly read-only while postponing export, archive/restore, Kanban, recapture, documents/contacts, deployment, and later product systems.
 
-Before Milestone 2:
+Milestone 1C gate (resolved 2026-08-05):
 
-- threat-model extension auth and stored credentials;
-- confirm production API origin and exact manifest permissions; and
-- define capture-size and sanitization limits.
+- keep table and board as two views of the same query and persist stage changes only by appending immutable events through the existing command;
+- preserve a non-drag keyboard alternative and confine mobile board overflow to the board region;
+- model contacts and document metadata through owner-scoped associations, append-only document versions, forced RLS, and narrow grants;
+- export owner-scoped data without server-side export retention, and distinguish transactionally deleting tracker data from deleting the Clerk identity; and
+- retain explicit read-only demo behavior while excluding archive/restore, recapture, deployment, extension, email, Hiring Pulse, uploads, billing, and real-user beta admission.
+
+Milestone 2A gate (resolved 2026-08-05):
+
+- use Clerk's standalone Chrome Extension SDK/Native API flow with on-demand session tokens; do not request `cookies` for Sync Host;
+- allow only the exact configured Wip API and Clerk Frontend API hosts alongside `activeTab`, `scripting`, and session-backed `storage`;
+- accept extension capture through a bounded, authenticated, exact-origin CORS endpoint that derives the owner server-side; and
+- sanitize semantic HTML, normalize URLs, and compute the authoritative content hash on the server before an atomic create/event/snapshot write.
 
 Before Milestone 3:
 

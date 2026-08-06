@@ -4,6 +4,8 @@ node_modules/
 .pnpm-store/
 coverage/
 dist/
+.output/
+.wxt/
 *.tsbuildinfo
 .DS_Store
 .env

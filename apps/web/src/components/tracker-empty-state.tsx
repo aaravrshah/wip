@@ -1,4 +1,4 @@
-import { Inbox } from 'lucide-react';
+import { Inbox, Plus } from 'lucide-react';
 import Link from 'next/link';
 
 export function TrackerEmptyState({ context }: { context: 'applications' | 'today' }) {
@@ -10,18 +10,18 @@ export function TrackerEmptyState({ context }: { context: 'applications' | 'toda
       <p className="eyebrow">A fresh start</p>
       <h1 id="empty-heading">Your tracker is ready.</h1>
       <p>
-        This account does not have any applications yet. Application editing arrives in the next
-        milestone; no fictional demo records have been copied into your private workspace.
+        This account does not have any applications yet. Start with a company and role; no fictional
+        demo records have been copied into your private workspace.
       </p>
-      {context === 'applications' ? (
-        <Link className="button button-secondary" href="/">
+      <Link className="button button-primary" href="/applications/new">
+        <Plus aria-hidden="true" size={17} /> Add your first application
+      </Link>
+      {context === 'applications' && (
+        <Link className="text-link" href="/">
           Back to Today
         </Link>
-      ) : (
-        <Link className="button button-secondary" href="/applications">
-          View applications
-        </Link>
       )}
+      <small>New accounts start empty. Fictional demo records are never copied here.</small>
     </section>
   );
 }

@@ -1,7 +1,14 @@
 import { clerkMiddleware } from '@clerk/nextjs/server';
 import { NextResponse } from 'next/server';
 
-const authenticatedProxy = clerkMiddleware();
+const configuredWebOrigin = process.env.WIP_WEB_ORIGIN ?? 'http://localhost:3000';
+const configuredExtensionOrigins = (process.env.WIP_EXTENSION_ORIGINS ?? '')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+const authenticatedProxy = clerkMiddleware({
+  authorizedParties: [configuredWebOrigin, ...configuredExtensionOrigins],
+});
 
 export default process.env.WIP_DATA_SOURCE === 'neon'
   ? authenticatedProxy

@@ -30,6 +30,20 @@ export type ServerEnvironment =
 
 let cachedEnvironment: ServerEnvironment | undefined;
 
+const extensionOriginSchema = z
+  .string()
+  .trim()
+  .regex(/^chrome-extension:\/\/[a-p]{32}$/);
+
+export function parseExtensionOrigins(value: string | undefined): readonly string[] {
+  if (!value?.trim()) return [];
+  return [...new Set(value.split(',').map((origin) => extensionOriginSchema.parse(origin)))];
+}
+
+export function getExtensionOrigins(): readonly string[] {
+  return parseExtensionOrigins(process.env.WIP_EXTENSION_ORIGINS);
+}
+
 export function parseServerEnvironment(
   values: Record<string, string | undefined>,
 ): ServerEnvironment {

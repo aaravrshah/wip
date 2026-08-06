@@ -22,6 +22,34 @@
       "when": 1785899718543,
       "tag": "0002_clerk_auth_rls",
       "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785908892803,
+      "tag": "0003_silky_the_fallen",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785908933313,
+      "tag": "0004_broad_tombstone",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1785912268439,
+      "tag": "0005_milestone_1c_tracker",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1785913604279,
+      "tag": "0006_tracker-deletion-settings",
+      "breakpoints": true
     }
   ]
 }

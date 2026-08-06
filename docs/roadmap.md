@@ -1,7 +1,7 @@
 # Wip roadmap
 
 Status: active milestone sequence
-Last updated: 2026-08-04
+Last updated: 2026-08-05
 
 ## Delivery rules across milestones
 
@@ -158,48 +158,104 @@ Add production-shaped authentication, internal owner provisioning, and database-
 - Kanban until the end of Milestone 1.
 - Chrome extension, email ingestion, Hiring Pulse, file content/uploads, billing, and external beta admission.
 
-## Milestone 1B-3 — Authenticated manual tracker completion
+## Milestone 1B-3 — Authenticated application management and event-first mutations
 
 ### Goal
 
-Complete the manually managed tracker over the authenticated Neon system of record without rewriting the Milestone 1A screens.
+Make the authenticated tracker useful for core manual application management over Neon without expanding into the remaining end-of-Milestone-1 features.
 
 ### User-visible scope
 
-- Create, edit, archive, restore, and delete applications.
-- Paste and save immutable job-description snapshots.
-- Add backdated/current manual events and see the derived stage.
-- Record document-version metadata and exact prepared/submitted uses.
-- Manage contacts, notes, and next actions; complete/reschedule actions.
-- Export personal data in a lossless JSON baseline.
-- Add Kanban at the end of Milestone 1.
+- Create an application with company/role, canonical stage, source/location/workplace facts, requisition ID, optional applied date, optional next action, and optional pasted job description.
+- Edit mutable application facts with stale-update protection.
+- Append current/backdated manual stage events and see the deterministic derived stage without rewriting prior events.
+- Add, edit, and remove private notes.
+- Add, complete, reschedule, edit, and remove next actions; Today responds to open/completed/due changes.
+- Permanently delete one application after typing its exact company or role.
+- Preserve existing read-only document metadata and contacts; demo mode remains explicitly read-only.
 
 ### Technical scope
 
-- Add typed `/api/v1` query/command routes and transactionally safe event/projection writes.
-- Add write-side RLS policies only with tested command semantics and strict owner checks.
-- Implement shared event taxonomy, stage projector, confirmation policy, export, and deletion behavior.
-- Add CI, a small Playwright critical path, and sanitized structured logging.
+- Add strict shared Zod command schemas and stable `/api/v1` application, stage-event, note, and next-action routes.
+- Keep route handlers thin over request-local query/command services; derive identity only from the verified Clerk session/JWT.
+- Use Neon HTTP/Drizzle batch transactions for application + initial-event creation and event + projection updates.
+- Preserve effective event time separately from server creation time; use owner-unique idempotency for creates/events and row versions for stale fact/note/action writes.
+- Require exact same-origin unsafe requests, JSON where bodies are expected, bounded streamed bodies/fields, validated path IDs, and stable machine-readable errors.
+- Add forward-only Drizzle migrations with narrow grants and owner-matching INSERT/UPDATE/DELETE RLS only for implemented mutable tables; events/snapshots remain insert-only and immutable.
+- Keep `DATABASE_URL` and `DIRECT_DATABASE_URL` out of every real-user read/write path.
 
 ### Acceptance criteria
 
-1. A new authenticated user can create an application with an optional immutable snapshot and a confirmed `application.created` event.
-2. Recapture inserts a new immutable snapshot; manual/backdated events retain occurrence and creation time and deterministically project stage.
-3. Corrections are auditable and never destructively rewrite history.
-4. Today, table/cards, detail, search/filter/sort, document uses, contacts, notes, and actions work across desktop/mobile.
-5. Kanban uses the same records/commands and provides keyboard/menu status movement.
-6. User A cannot read, mutate, link, export, or delete User B's data through UI, API, or exposed database access.
-7. Application/account deletion and complete export exist before real-user beta.
-8. Accessibility, formatting, lint, type-check, unit/integration/RLS tests, build, and the critical Playwright path pass.
+1. A new authenticated user can create an application with an optional immutable pasted snapshot, optional action, and exactly one confirmed `application.created` event in one atomic command.
+2. Retrying the same create/event key does not duplicate records; reusing it with different input conflicts.
+3. Fact edits create one meaningful audit event, no-op formatting does not create noise, and stale versions conflict instead of silently overwriting.
+4. Manual/current/backdated stage events retain occurrence and creation time, stay immutable, allow realistic corrections, and deterministically update the projection in the same transaction.
+5. Notes and actions support their scoped lifecycle; completed actions leave Today and rescheduled actions use the new due time.
+6. The permanent-delete control requires exact company/role confirmation, deletes dependent rows, has no recovery UI, and discloses backup-retention limits.
+7. `/api/v1` rejects unauthenticated, cross-origin, unsupported, oversized, malformed, and caller-forged ownership input with stable error semantics.
+8. User A cannot read, edit, transition, note, schedule, or delete User B's application, even with known IDs; PostgreSQL RLS remains forced and the role remains `NOBYPASSRLS`.
+9. The explicit fictional demo renders but rejects every mutation attempt.
+10. Existing Today, table/mobile cards, detail, search/filter/sort, documents, contacts, and responsive/accessibility behavior remain intact.
+11. Formatting, lint, strict type-check, unit/UI tests, applicable live migration/mutation/two-user RLS tests, production build, diff checks, and configured browser QA pass.
 
 ### Deliberately postponed
 
 - Chrome extension and browser permissions until Milestone 2.
 - Forwarded email/model calls until Milestone 3.
 - Hiring Pulse until Milestone 4.
+- Kanban, archive/restore, export/account deletion, additional snapshot capture/recapture, document/contact mutation, deployment, and external-beta operations until separately scoped Milestone 1 slices.
 - External reminder channels, file content/uploads, imports, bulk editing, teams, native apps, job discovery, and auto-apply.
 
-## Milestone 2 — Current-job Chrome capture
+## Milestone 1C — Complete core manual tracker
+
+Status: implemented 2026-08-05
+
+### Goal
+
+Finish the core Wip tracker experience without beginning capture, automated ingestion, analytics, uploads, or deployment.
+
+### User-visible scope
+
+- Switch Applications between the default responsive table/cards and a nine-column board over the same filtered applications.
+- Move an application by drag-and-drop or a labeled selector, confirm backward/terminal transitions, and receive pending/success/error feedback with rollback.
+- Create, associate, edit, and remove minimal application contact metadata.
+- Create/edit logical resume, cover-letter, portfolio, or other metadata; append immutable versions and associate exact versions/purposes with an application.
+- Download a versioned full-tracker JSON export or spreadsheet-safe applications CSV.
+- Permanently delete all tracker data after an exact phrase while keeping the separate Clerk authentication account.
+- Guide an empty authenticated owner directly to creating a first application, preserving form values after server validation errors.
+
+### Technical scope
+
+- Reuse the existing repository, validation, authenticated request factory, transactional stage command, and event projector.
+- Add native board interactions without a drag-and-drop dependency; confine mobile horizontal scrolling to the board region.
+- Add strict shared contact/document/deletion schemas and thin same-origin `/api/v1` routes over owner-scoped metadata/data services.
+- Add forward-only migrations for contact/document taxonomies, optimistic versions, forced-RLS policies, least-privilege grants, and the zero-argument transactional deletion function.
+- Keep events, snapshots, and document versions immutable and ensure caller input never contains authoritative ownership.
+- Generate exports directly from owner-scoped reads without persisting an artifact.
+
+### Acceptance criteria
+
+1. Table stays default; switching to Board preserves search/stage/sort inputs and renders all canonical stages plus empty-column guidance.
+2. Dragging or choosing a stage appends the same confirmed immutable event and updates the deterministic projection; failure restores the prior card column.
+3. A fully labeled keyboard-accessible stage selector exists, and backward/terminal transitions require a cancelable confirmation surface.
+4. At approximately 390×844, the page does not overflow horizontally; only the board scroller does.
+5. Contacts and associations support create/link/edit/remove for the authenticated owner and reject cross-owner references through PostgreSQL RLS.
+6. Logical documents support metadata edits and append-only versions/application uses; the runtime role cannot update or delete a document-version row.
+7. JSON export contains every implemented tracker entity in the documented versioned envelope and no owner/auth credentials; CSV is owner-scoped and formula-neutralized.
+8. Whole-tracker deletion requires `DELETE MY WIP DATA`, deletes only the authenticated owner's tracker rows transactionally, resets tracker settings, and does not delete the Clerk account.
+9. New-user empty states lead to application creation; important mutations expose loading/success/error feedback and validation failures preserve entered values.
+10. Unit/UI/route/schema tests pass, and disposable-branch integration coverage verifies event ordering, contact ownership, document immutability, export isolation, and deletion isolation when configured.
+11. Formatting, lint, strict type-check, production build, migration drift, diff checks, and desktop/mobile browser QA pass to the extent local authentication configuration permits.
+
+### Deliberately postponed
+
+- Archive/restore and snapshot recapture.
+- Chrome extension, email ingestion, Hiring Pulse, uploads/file content, billing, deployment, and real-user beta admission.
+- Clerk-account deletion, asynchronous large-export storage, imports, bulk editing, external reminders, collaboration, native apps, job discovery, and auto-apply.
+
+## Milestone 2A — First user-invoked Chrome capture
+
+Status: implemented 2026-08-05
 
 ### Goal
 
@@ -207,31 +263,34 @@ Let a signed-in user intentionally capture the current job page into the tracker
 
 ### User-visible scope
 
-- Install the Manifest V3 extension and connect it to the Wip account.
+- Load the Manifest V3 extension locally and sign in through Clerk's standalone Native API flow.
 - Click the extension action on a job page.
-- Preview/edit detected company, role, location, URL, and job description.
-- Create a new application or add a new immutable snapshot to an existing application.
-- Receive a useful manual fallback when extraction is incomplete or the page is restricted.
+- Preview/edit detected company, role, location, canonical stage, optional metadata, exact URL, and job description.
+- Explicitly save a new application with one immutable semantic snapshot, or open a conservatively detected existing application.
+- Receive a useful manual-add fallback when extraction is incomplete or the page is restricted.
 
 ### Technical scope
 
 - Add `apps/extension` using WXT and shared domain/schema/API packages.
-- Use packaged code, MV3 service worker behavior, user-invoked `activeTab`, `scripting`, `storage`, a narrow Wip API host permission, and the approved auth flow.
-- Implement standards-first extraction: `JobPosting` JSON-LD, semantic document regions, then bounded generic heuristics. Isolate any site adapters and test them against committed synthetic fixtures.
-- Sanitize and validate in both extension and server; the server remains authoritative.
-- Store page content only transiently in the extension and clear it after save/cancel.
+- Use packaged code, user-invoked `activeTab`, `scripting`, `storage`, exact Wip API/Clerk Frontend API hosts, and Clerk's standalone Chrome Extension SDK/Native API flow. Do not use Sync Host because its current documented flow requires `cookies`.
+- Implement standards-first extraction: complete `JobPosting` JSON-LD, focused ATS/semantic document regions, then a bounded signaled main-region heuristic. Test against committed fictional fixtures rather than live sites.
+- Share the strict capture command/response schema. Keep the fetch client in the extension and the owner-derived transaction in the web command service.
+- Sanitize and hash again on the server; all extension fields remain untrusted.
+- Store an unfinished reviewed page only in `chrome.storage.session`; clear it after save/cancel.
+- Return typed created/duplicate results, detect duplicates only with owner-scoped normalized URL or requisition-plus-company signals, and use an owner-scoped idempotency key for retries.
 
 ### Acceptance criteria
 
-1. The published manifest requests no `<all_urls>`, broad content-script match, history, cookies, network interception, downloads, or unlimited-storage permission.
+1. The built manifest requests only `activeTab`, `scripting`, and `storage`, plus exact configured Wip and Clerk hosts; it has no `<all_urls>`, broad content-script match, `tabs`, `identity`, history, cookies, network interception, downloads, or unlimited-storage permission.
 2. Page access occurs only after a user gesture and only for the current tab. A permission snapshot test fails if scope broadens unexpectedly.
 3. A fixture with valid `JobPosting` data and a generic semantic fixture both produce a preview with provenance and extraction warnings.
-4. The user can edit every captured field and must explicitly save before anything reaches the system of record.
-5. Saving creates exactly one idempotent application/snapshot operation, including retry after a lost response.
+4. The user can edit core/optional metadata and must explicitly save before job content reaches the system of record; signed-out, loading, unsupported, saving, recoverable-error, duplicate, and success states are accessible.
+5. Saving creates exactly one idempotent application/confirmed-extension-event/snapshot operation, including retry after a lost response.
 6. The saved snapshot remains available after the source fixture/page is removed and includes capture time, URL, extractor version, plain text, sanitized HTML, and content hash.
-7. Unsupported/restricted pages fail safely with a manual paste/select path and no permission escalation.
-8. Authentication tokens are scoped, revocable, never injected into the page, and not logged. The final storage/refresh design has a documented threat model.
-9. Extension unit/integration tests, controlled browser tests, lint, and type-check pass in CI.
+7. Unsupported/restricted pages fail safely with a manual web-add path and no permission escalation.
+8. A duplicate opens the existing application and never overwrites/attaches to its immutable history. Company/title similarity alone does not merge records.
+9. The API requires a verified normal Clerk session token and exact extension-origin CORS; it derives/provisions the owner server-side and retains forced RLS. The extension never receives a database URL, secret, or custom Neon token.
+10. Extension fixture/popup/manifest/storage tests, web route/sanitization tests, configured database transaction/RLS tests, production builds, ZIP generation, and built-artifact secret/permission scans pass when their required environments are available.
 
 ### Deliberately postponed
 
@@ -240,7 +299,38 @@ Let a signed-in user intentionally capture the current job page into the tracker
 - Form filling, auto-apply, or application submission.
 - Applicant-tracking-system passwords or cookies.
 - Automatic detection of application-confirmation pages unless separately scoped after the capture flow is proven.
-- Firefox/Safari publication, even though shared code should avoid needless Chrome coupling.
+- Attaching a new snapshot to an existing application, explicit create-anyway override, snapshot history UI, and named-site support promises.
+- Stable production CRX identity, Chrome Web Store submission, deployment, Firefox/Safari publication, and external-beta operations.
+
+## Milestone 2B — Capture hardening and beta preparation
+
+### Goal
+
+Use observed 2A failures to harden capture and duplicate workflows without broadening background access.
+
+### Recommended scope
+
+- Configure and test a stable development/production CRX ID and documented Clerk allowed origins.
+- Decide the production extension-auth experience after reviewing Native API abuse/session storage and the `cookies` tradeoff for Sync Host; do not add a permission silently.
+- Add an explicit user-confirmed action to append a new immutable snapshot to an existing duplicate, plus a deliberate create-anyway escape hatch where safe.
+- Add snapshot history/version selection on Application Detail before supporting attachment.
+- Add only a small number of isolated ATS adapters selected from real opt-in failure reports, backed by sanitized fictional regression fixtures.
+- Perform controlled browser QA across accessible static/dynamic pages, CSP-heavy pages, iframed job views, and expired/revoked sessions.
+- Reduce or deliberately accept the Clerk popup bundle size, finish stable icons/store metadata, and prepare—but do not publish—a store-review artifact.
+
+### Acceptance criteria
+
+1. Stable IDs keep Clerk and Wip origin allowlists deterministic across rebuilds.
+2. Snapshot attachment is an explicit confirmed append and never rewrites an earlier snapshot or timeline.
+3. Create-anyway cannot be triggered by a network retry and remains idempotent.
+4. Every added adapter has fictional regression fixtures, bounded DOM scope, provenance, and a generic fallback.
+5. Authentication expiry/revocation, CORS denial, duplicate races, and dynamic-page failures recover without data loss or broader permissions.
+6. Store-readiness review confirms packaged-code-only MV3 behavior, narrow disclosure, accessibility, bundle size, and no secrets; publication remains separately authorized.
+
+### Deliberately postponed
+
+- Background monitoring, search-result harvesting, confirmation-page detection, broad host access, auto-apply/form filling, and employer credentials/cookies.
+- Email ingestion, Hiring Pulse, file uploads, external reminders, billing, and native/mobile clients.
 
 ## Milestone 3 — Forwarded-email ingestion with confirmation
 
@@ -345,8 +435,8 @@ Show privacy-protected aggregate hiring timelines and rates from explicitly cons
 4. Complete responsive/accessibility, interaction tests, browser QA, and production build validation; stop at the 1A boundary.
 5. **Milestone 1B-1:** add Neon/Drizzle schema, checked-in migrations, fictional idempotent seed, read repository, and database integration tests.
 6. **Milestone 1B-2:** integrate Clerk, idempotent owner provisioning, least-privilege authenticated reads, and forced RLS; remain read-only.
-7. **Milestone 1B-3:** add `/api/v1` commands, creation/editing, immutable persisted snapshots/events/actions, export, and deletion foundations.
-8. Add Kanban over the same query/commands at the end of Milestone 1.
-9. Complete cross-user, security/privacy, and end-to-end validation before beta.
+7. **Milestone 1B-3:** add the versioned application/stage/note/action commands, optional pasted snapshot on create, stale/idempotent/atomic event behavior, narrow write RLS, and permanent single-application deletion.
+8. **Milestone 1C:** add Kanban over the same stage command, contact/document-version metadata, direct JSON/CSV export, and whole-tracker deletion while retaining the Clerk account.
+9. Complete separately scoped archive/restore, snapshot recapture, deployment readiness, vendor/legal review, and configured cross-user/end-to-end validation before beta.
 
-Milestone 1A validates the screens and read model first. Milestone 1B-1 proves persistent read parity; 1B-2 adds authenticated read isolation; 1B-3 completes manual tracker mutations without changing every component.
+Milestone 1A validates the screens and read model first. Milestone 1B-1 proves persistent read parity; 1B-2 adds authenticated read isolation; 1B-3 implements the core manual mutation vertical; 1C completes the scoped core tracker experience without claiming production or external-beta readiness.

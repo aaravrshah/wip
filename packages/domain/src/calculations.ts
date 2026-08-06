@@ -19,6 +19,13 @@ function descendingDate(left?: string, right?: string): number {
   return timestamp(right) - timestamp(left);
 }
 
+function isOpenAction(application: Application): boolean {
+  return Boolean(
+    application.nextAction &&
+    (application.nextAction.state === undefined || application.nextAction.state === 'open'),
+  );
+}
+
 export function getStageCounts(applications: Application[]): Record<ApplicationStage, number> {
   const counts = Object.fromEntries(applicationStages.map((stage) => [stage, 0])) as Record<
     ApplicationStage,
@@ -43,7 +50,12 @@ export function getUpcomingItems(
   return applications
     .filter((application) => {
       const action = application.nextAction;
-      if (!action || (action.kind !== 'assessment' && action.kind !== 'interview')) return false;
+      if (
+        !action ||
+        !isOpenAction(application) ||
+        (action.kind !== 'assessment' && action.kind !== 'interview')
+      )
+        return false;
       const dueAt = timestamp(action.dueAt);
       return dueAt >= start && dueAt <= end;
     })
@@ -60,6 +72,7 @@ export function getOverdueFollowUps(applications: Application[], now: Date): App
   return applications
     .filter(
       (application) =>
+        isOpenAction(application) &&
         application.nextAction?.kind === 'follow-up' &&
         timestamp(application.nextAction.dueAt) < now.getTime(),
     )
