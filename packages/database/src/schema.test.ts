@@ -24,7 +24,12 @@ describe('database ownership schema', () => {
       expect(config.enableRLS, `${tableName} should enable RLS`).toBe(true);
       expect(config.policies.some((policy) => policy.for === 'select')).toBe(true);
       for (const policy of config.policies) {
-        expect(policy.to).toMatchObject({ name: 'authenticated' });
+        expect(policy.to).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ name: 'authenticated' }),
+            expect.objectContaining({ name: 'wip_runtime' }),
+          ]),
+        );
       }
     }
 
@@ -102,5 +107,35 @@ describe('database ownership schema', () => {
     expect(settingsMigration).toMatch(/timezone = 'UTC'/);
     expect(settingsMigration).toMatch(/locale = NULL/);
     expect(settingsMigration).toMatch(/week_starts_on = NULL/);
+  });
+
+  test('adds a non-login runtime role that uses server-verified transaction claims', () => {
+    const migration = readFileSync(
+      resolve(import.meta.dirname, '../drizzle/0007_server_verified_runtime.sql'),
+      'utf8',
+    );
+
+    expect(migration).toMatch(/CREATE ROLE wip_runtime[\s\S]*NOLOGIN[\s\S]*NOBYPASSRLS/);
+    expect(migration).toMatch(/current_setting\('request\.jwt\.claims', true\)/);
+    expect(migration).toMatch(/wip_clerk_subject\(\)/);
+    expect(migration).toMatch(/TO authenticated, wip_runtime/);
+    expect(migration).toMatch(/GRANT SELECT ON TABLE[\s\S]*TO wip_runtime/);
+    expect(migration).not.toMatch(/GRANT UPDATE[^;]*application_events[^;]*TO wip_runtime/);
+    expect(migration).not.toMatch(
+      /GRANT (UPDATE|DELETE)[^;]*job_description_snapshots[^;]*TO wip_runtime/,
+    );
+    expect(migration).not.toMatch(/PASSWORD\s+'/i);
+  });
+
+  test('provisions an existing Clerk owner across every applicable unique constraint', () => {
+    const migration = readFileSync(
+      resolve(import.meta.dirname, '../drizzle/0008_owner_provisioning_idempotency.sql'),
+      'utf8',
+    );
+
+    expect(migration).toMatch(/wip_provision_owner\(\)/);
+    expect(migration).toMatch(/ON CONFLICT DO NOTHING/);
+    expect(migration).not.toMatch(/ON CONFLICT \(auth_subject\)/);
+    expect(migration).toMatch(/auth_provider = 'clerk'[\s\S]*auth_subject = clerk_subject/);
   });
 });

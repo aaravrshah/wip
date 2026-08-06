@@ -9,9 +9,7 @@ vi.mock('server-only', () => ({}));
 vi.mock('@/env/server', () => ({
   getServerEnvironment: () => ({
     dataSource: 'neon',
-    authenticatedDatabaseUrl:
-      'postgresql://authenticated@example-pooler.invalid/wip?sslmode=require',
-    clerkJwtTemplate: 'neon',
+    runtimeDatabaseUrl: `postgresql://wip_runtime:${'a'.repeat(64)}@example-pooler.invalid/wip?sslmode=require`,
   }),
 }));
 vi.mock('@/auth/server', () => ({
@@ -35,10 +33,9 @@ describe('authenticated repository selection', () => {
     expect(createAuthenticatedRepository).not.toHaveBeenCalled();
   });
 
-  test('passes only the server-issued database token, never a caller owner id', async () => {
+  test('passes only the server-verified Clerk subject, never a caller owner id', async () => {
     requireIdentity.mockResolvedValue({
       clerkUserId: 'user_test_a',
-      databaseToken: 'signed.jwt.value',
     });
     createAuthenticatedRepository.mockResolvedValue({
       listApplications: vi.fn().mockResolvedValue([]),
@@ -48,9 +45,8 @@ describe('authenticated repository selection', () => {
 
     await expect(applicationRepository.listApplications()).resolves.toEqual([]);
     expect(createAuthenticatedRepository).toHaveBeenCalledWith({
-      authenticatedDatabaseUrl:
-        'postgresql://authenticated@example-pooler.invalid/wip?sslmode=require',
-      databaseToken: 'signed.jwt.value',
+      runtimeDatabaseUrl: `postgresql://wip_runtime:${'a'.repeat(64)}@example-pooler.invalid/wip?sslmode=require`,
+      clerkUserId: 'user_test_a',
     });
   });
 });

@@ -10,7 +10,7 @@ Wip is a user-controlled job-application tracker. The repository now contains Mi
 - Intentional signed-out landing plus Clerk sign-in/sign-up and account menu
 - Google and passwordless email-link methods, enabled in the Clerk Dashboard
 - Internal UUID owner provisioning from a verified Clerk subject
-- Neon-authenticated reads behind `ApplicationRepository` and validated writes behind application command services
+- Clerk-verified, Neon RLS-protected reads behind `ApplicationRepository` and validated writes behind application command services
 - Add/edit applications, append manual stage events, manage notes and next actions, optionally paste an immutable semantic snapshot, and permanently delete an application with explicit confirmation
 - Table and Kanban views over the same applications, with all nine canonical stages, drag-and-drop, a keyboard-accessible stage selector, transition confirmation, and mutation rollback
 - Application contact management and reusable associations
@@ -48,15 +48,14 @@ Open [http://localhost:3000](http://localhost:3000). Development defaults to `WI
 1. Create a development application in the [Clerk Dashboard](https://dashboard.clerk.com/).
 2. Under **User & authentication → Email**, require email, keep **Verify at sign-up** enabled, and enable both **Email verification link** and **Email verification code**. Web sign-in can continue using links; the cookie-free extension popup requires email OTP because Clerk does not support email-link or OAuth redirects in a standalone popup. Password may remain disabled.
 3. Under **SSO connections**, add **Google → For all users** and enable it for sign-up/sign-in. Clerk's shared Google credentials are sufficient for a development instance; production will require a separate Google OAuth application.
-4. Under **JWT templates**, create a blank template named `neon`, retain the standard claims, add `{ "aud": "wip-neon" }`, and keep a short lifetime (the Clerk default is 60 seconds).
-5. Under **API keys**, copy the development publishable and secret keys. From the instance's Frontend API URL, form the JWKS URL as `https://YOUR_CLERK_FRONTEND_API/.well-known/jwks.json`.
-6. Set the allowed local application URL/path settings so `/sign-in` and `/sign-up` return to `http://localhost:3000`.
+4. Under **API keys**, copy the development publishable and secret keys.
+5. Set the allowed local application URL/path settings so `/sign-in` and `/sign-up` return to `http://localhost:3000`.
 
 Wip uses Clerk's current Next.js `proxy.ts`, server `auth()`/`auth.protect()`, and prebuilt authentication components. Clerk authenticates the request; PostgreSQL RLS remains the authorization boundary for records.
 
 ## Configure the Clerk Chrome extension flow
 
-Milestone 2A deliberately does not use Clerk Sync Host because Clerk's documented Sync Host manifest requires the `cookies` permission, which Wip does not request. The extension uses Clerk's standalone Chrome Extension SDK and Native API instead; it sends a short-lived normal Clerk session token to Wip, and the Next.js server obtains the separate short-lived `neon` template token only for its RLS database call.
+Milestone 2A deliberately does not use Clerk Sync Host because Clerk's documented Sync Host manifest requires the `cookies` permission, which Wip does not request. The extension uses Clerk's standalone Chrome Extension SDK and Native API instead; it sends a short-lived normal Clerk session token to Wip, where Clerk verifies it before the server establishes database tenant context.
 
 1. In the same Clerk development instance, open **Native applications** and enable the **Native API**. Review Clerk's warning that this public request path cannot use browser CAPTCHA in the same way as the web flow.
 2. Confirm email verification code is enabled as described above. Google and email-link methods are not available inside a standalone extension popup; users can still use them on the web app.
@@ -66,32 +65,48 @@ Milestone 2A deliberately does not use Clerk Sync Host because Clerk's documente
 
 Clerk's current official references are [Chrome Extension SDK authentication options](https://clerk.com/docs/reference/chrome-extension/overview), [Native API setup](https://clerk.com/docs/guides/development/deployment/chrome-extension), and [Sync Host permissions](https://clerk.com/docs/guides/sessions/sync-host).
 
-## Configure Neon RLS
+## Configure the Neon runtime role and RLS
 
 1. In the [Neon Console](https://console.neon.tech/), create a project and a disposable development branch near the intended Vercel region.
-2. Under **Settings → RLS**, configure a JWT/JWKS provider with the Clerk JWKS URL above and expected audience `wip-neon`. Do not enable the separate Data API on the same branch.
-3. From **Connect**, copy the privileged direct owner URL for migrations and privileged pooled owner URL for fictional seeding.
-4. Copy the passwordless authenticated connection shown by Neon after RLS setup. Wip expects the pooled form: `postgresql://authenticated@HOST-WITH--pooler/DATABASE?sslmode=require`.
-5. Copy `apps/web/.env.example` to the gitignored `apps/web/.env.local`, replace the Clerk/Neon placeholders, and set `WIP_DATA_SOURCE=neon`.
-6. Apply the checked-in migrations:
+2. Leave **Data API disabled**. Wip does not use Neon Auth, Neon Data API, or the unrelated OAuth Provider setting.
+3. From **Connect**, copy the privileged direct owner URL for migrations and privileged pooled owner URL for fictional seeding. Put them in the gitignored `apps/web/.env.local` as `DIRECT_DATABASE_URL` and `DATABASE_URL`.
+4. Apply the checked-in migrations. Migration `0007` creates `wip_runtime` as a locked `NOLOGIN`, `NOBYPASSRLS` role and adds only the current narrow policies/grants:
 
 ```bash
 pnpm db:migrate
 ```
 
-7. Optionally seed the isolated fictional demo owner. Authenticated users cannot see this owner because it has no Clerk subject:
+5. Generate a unique runtime password locally:
+
+```bash
+openssl rand -hex 32
+```
+
+6. In the Neon **SQL Editor** on the same branch/database, replace the placeholder and run this once. Do not put the real password in the repository or a screenshot:
+
+```sql
+ALTER ROLE wip_runtime LOGIN PASSWORD 'PASTE_THE_64_CHARACTER_VALUE_HERE';
+```
+
+7. Copy the pooled owner connection string and create `NEON_RUNTIME_DATABASE_URL` by replacing only its username/password with `wip_runtime` and the generated value. The result has this shape:
+
+```text
+postgresql://wip_runtime:YOUR_64_CHARACTER_PASSWORD@YOUR-POOLER-HOST/DATABASE?sslmode=require
+```
+
+8. Set `WIP_DATA_SOURCE=neon`, the Clerk keys, and that runtime URL in `apps/web/.env.local`. Optionally seed the isolated fictional demo owner; authenticated users cannot see it because it has no Clerk subject:
 
 ```bash
 pnpm db:seed
 ```
 
-8. Start the app and create/sign in to a Clerk test account:
+9. Start the app and create/sign in to a Clerk test account:
 
 ```bash
 pnpm dev
 ```
 
-A first verified request calls the zero-argument `wip_provision_owner()` database function. The function derives the Clerk subject from Neon-verified JWT context and idempotently creates an empty Wip owner. It never accepts an owner ID or auth subject from browser input. All authenticated reads and writes use the passwordless Neon URL plus the request's short-lived Clerk JWT; the web runtime never uses either privileged database URL.
+A first verified request opens a request-local transaction, sets the Clerk-verified subject transaction-locally, and calls the zero-argument `wip_provision_owner()` database function. The function idempotently creates an empty Wip owner and never accepts an owner ID or auth subject from browser input. All authenticated reads/writes use the password-protected `wip_runtime` URL; its role cannot bypass forced RLS. The web runtime never uses either privileged database URL.
 
 ## Run the web app and extension together
 
@@ -119,8 +134,7 @@ The deterministic local job page is [http://localhost:3000/dev/fixtures/job-post
 | ----------------------------------- | ---------------------------------- | ---------------------------------------------------------------------- |
 | `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Web Clerk SDK                      | Public instance identifier, not a secret                               |
 | `CLERK_SECRET_KEY`                  | Clerk server SDK only              | Secret; never browser/extension-exposed                                |
-| `CLERK_JWT_TEMPLATE`                | Server token retrieval             | Template name; defaults to `neon`                                      |
-| `NEON_AUTHENTICATED_DATABASE_URL`   | Authenticated Next.js reads/writes | Passwordless `authenticated` role, forced-RLS reads and narrow writes  |
+| `NEON_RUNTIME_DATABASE_URL`         | Authenticated Next.js reads/writes | Passworded `wip_runtime` role, forced-RLS reads and narrow writes      |
 | `DIRECT_DATABASE_URL`               | drizzle-kit migration command      | Privileged direct owner connection; never runtime                      |
 | `DATABASE_URL`                      | Fictional seed command only        | Privileged pooled owner connection; never authenticated runtime        |
 | `WIP_OWNER_ID`                      | Fictional seed tooling only        | Demo owner selector; never authenticated runtime                       |
@@ -149,7 +163,7 @@ pnpm zip:extension
 git diff --check
 ```
 
-For the complete migration/mutation/RLS suite, configure `TEST_DATABASE_URL`, `TEST_NEON_AUTHENTICATED_DATABASE_URL`, and short-lived Clerk JWTs for two fictional test users in `TEST_CLERK_USER_A_JWT` and `TEST_CLERK_USER_B_JWT`. `TEST_CLERK_EXPIRED_JWT` enables the separate expired-token check. These tests create, mutate, and delete only fictional fixtures and must never target production or a branch with real data.
+For the complete migration/mutation/RLS suite, configure `TEST_DATABASE_URL`, `TEST_NEON_RUNTIME_DATABASE_URL`, `TEST_CLERK_USER_A_ID`, and `TEST_CLERK_USER_B_ID` with fictional subjects. Clerk token verification is covered at the server boundary; the live database suite tests transaction identity and cross-owner RLS. These tests create, mutate, and delete only fictional fixtures and must never target production or a branch with real data.
 
 `drizzle-kit push` is not a production migration strategy for Wip.
 

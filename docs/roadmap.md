@@ -132,10 +132,10 @@ Add production-shaped authentication, internal owner provisioning, and database-
 ### Technical scope
 
 - Use current `@clerk/nextjs` APIs and Next.js 16 `proxy.ts`; enforce auth next to every protected page/data resource.
-- Request the configured short-lived Clerk custom JWT server-side and pass it through Neon's driver `authToken` option.
-- Register Clerk's JWKS and fixed audience with Neon RLS; use the passwordless `authenticated@` runtime connection.
+- Verify Clerk sessions server-side and establish only the verified `sub` transaction-locally before database access, per C-046.
+- Use the SQL-created, password-protected `wip_runtime` connection; keep Neon Data API disabled.
 - Idempotently map verified Clerk `sub` to an internal owner UUID through a zero-argument function.
-- Enable and force RLS on `owners` and all ten `owner_id` tables. Use a `NOBYPASSRLS` authenticated role with SELECT plus only the owner-provision function.
+- Enable and force RLS on `owners` and all ten `owner_id` tables. Use a non-elevated `NOBYPASSRLS` runtime role with SELECT plus only the owner-provision function at this milestone.
 - Keep privileged migration and seed URLs out of normal web runtime and keep authenticated repositories request-local.
 - Add offline policy/config/UI coverage and opt-in live two-user RLS tests.
 
@@ -146,7 +146,7 @@ Add production-shaped authentication, internal owner provisioning, and database-
 3. First verified access provisions exactly one internal owner for the Clerk subject; retries return the same UUID and the browser cannot supply either identifier.
 4. New owners receive no applications and never see the fictional seed.
 5. User A cannot read User B's rows even when User B's internal UUID or public application ID is known.
-6. Missing, malformed, expired, wrong-signature, wrong-issuer, or wrong-audience JWTs fail closed at the authentication/Neon boundary.
+6. Missing, malformed, expired, wrong-signature, or wrong-issuer Clerk sessions fail closed at the server authentication boundary before a database transaction opens.
 7. All identity/owned tables have enabled and forced RLS; the runtime role cannot bypass RLS or write tracker tables.
 8. The demo source still works only through explicit configuration and cannot silently activate in production.
 9. Existing UI/domain tests remain green; formatting, lint, strict type-check, applicable integration tests, build, and responsive/accessibility QA pass when the required credentials are configured.
@@ -177,8 +177,8 @@ Make the authenticated tracker useful for core manual application management ove
 ### Technical scope
 
 - Add strict shared Zod command schemas and stable `/api/v1` application, stage-event, note, and next-action routes.
-- Keep route handlers thin over request-local query/command services; derive identity only from the verified Clerk session/JWT.
-- Use Neon HTTP/Drizzle batch transactions for application + initial-event creation and event + projection updates.
+- Keep route handlers thin over request-local query/command services; derive identity only from the verified Clerk session.
+- Use identity-establishing Neon transactions for application + initial-event creation and event + projection updates.
 - Preserve effective event time separately from server creation time; use owner-unique idempotency for creates/events and row versions for stale fact/note/action writes.
 - Require exact same-origin unsafe requests, JSON where bodies are expected, bounded streamed bodies/fields, validated path IDs, and stable machine-readable errors.
 - Add forward-only Drizzle migrations with narrow grants and owner-matching INSERT/UPDATE/DELETE RLS only for implemented mutable tables; events/snapshots remain insert-only and immutable.

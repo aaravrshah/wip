@@ -96,25 +96,27 @@ export const nextActionStateEnum = pgEnum('next_action_state', ['open', 'complet
 const utcTimestamp = (name: string) => timestamp(name, { mode: 'date', withTimezone: true });
 
 export const authenticatedRole = pgRole('authenticated').existing();
+export const runtimeRole = pgRole('wip_runtime').existing();
+const tenantRoles = [authenticatedRole, runtimeRole];
 
 const ownerReadPolicy = (name: string, ownerId: AnyPgColumn) =>
   pgPolicy(name, {
     for: 'select',
-    to: authenticatedRole,
+    to: tenantRoles,
     using: sql`${ownerId} = (select public.wip_current_owner_id())`,
   });
 
 const ownerInsertPolicy = (name: string, ownerId: AnyPgColumn) =>
   pgPolicy(name, {
     for: 'insert',
-    to: authenticatedRole,
+    to: tenantRoles,
     withCheck: sql`${ownerId} = (select public.wip_current_owner_id())`,
   });
 
 const ownerUpdatePolicy = (name: string, ownerId: AnyPgColumn) =>
   pgPolicy(name, {
     for: 'update',
-    to: authenticatedRole,
+    to: tenantRoles,
     using: sql`${ownerId} = (select public.wip_current_owner_id())`,
     withCheck: sql`${ownerId} = (select public.wip_current_owner_id())`,
   });
@@ -122,7 +124,7 @@ const ownerUpdatePolicy = (name: string, ownerId: AnyPgColumn) =>
 const ownerDeletePolicy = (name: string, ownerId: AnyPgColumn) =>
   pgPolicy(name, {
     for: 'delete',
-    to: authenticatedRole,
+    to: tenantRoles,
     using: sql`${ownerId} = (select public.wip_current_owner_id())`,
   });
 
@@ -151,8 +153,8 @@ export const owners = pgTable(
     ),
     pgPolicy('owners_clerk_identity_select', {
       for: 'select',
-      to: authenticatedRole,
-      using: sql`${table.authProvider} = 'clerk' and ${table.authSubject} = (select auth.user_id())`,
+      to: tenantRoles,
+      using: sql`${table.authProvider} = 'clerk' and ${table.authSubject} = (select public.wip_clerk_subject())`,
     }),
   ],
 ).enableRLS();

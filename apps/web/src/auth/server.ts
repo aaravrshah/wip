@@ -7,12 +7,10 @@ import { getServerEnvironment } from '@/env/server';
 interface ClerkSessionState {
   isAuthenticated: boolean;
   userId: string | null;
-  getToken(options: { template: string }): Promise<string | null>;
 }
 
 export interface AuthenticatedDatabaseIdentity {
   clerkUserId: string;
-  databaseToken: string;
 }
 
 export class AuthenticationRequiredError extends Error {
@@ -24,18 +22,12 @@ export class AuthenticationRequiredError extends Error {
 
 export async function resolveAuthenticatedDatabaseIdentity(
   session: ClerkSessionState,
-  jwtTemplate: string,
 ): Promise<AuthenticatedDatabaseIdentity> {
   if (!session.isAuthenticated || !session.userId) {
     throw new AuthenticationRequiredError();
   }
 
-  const databaseToken = await session.getToken({ template: jwtTemplate });
-  if (!databaseToken) {
-    throw new AuthenticationRequiredError('Clerk did not issue the required Neon JWT.');
-  }
-
-  return { clerkUserId: session.userId, databaseToken };
+  return { clerkUserId: session.userId };
 }
 
 export async function hasAuthenticatedSession(): Promise<boolean> {
@@ -50,7 +42,7 @@ export async function requireAuthenticatedDatabaseIdentity(): Promise<Authentica
   }
 
   const session = await auth.protect();
-  return resolveAuthenticatedDatabaseIdentity(session, environment.clerkJwtTemplate);
+  return resolveAuthenticatedDatabaseIdentity(session);
 }
 
 export async function requireApiDatabaseIdentity(): Promise<AuthenticatedDatabaseIdentity> {
@@ -59,8 +51,5 @@ export async function requireApiDatabaseIdentity(): Promise<AuthenticatedDatabas
     throw new AuthenticationRequiredError('Authenticated data access is unavailable in demo mode.');
   }
 
-  return resolveAuthenticatedDatabaseIdentity(
-    await auth({ acceptsToken: 'session_token' }),
-    environment.clerkJwtTemplate,
-  );
+  return resolveAuthenticatedDatabaseIdentity(await auth({ acceptsToken: 'session_token' }));
 }

@@ -9,6 +9,7 @@ const forbiddenContent = [
   /DATABASE_URL/,
   /DIRECT_DATABASE_URL/,
   /NEON_AUTHENTICATED_DATABASE_URL/,
+  /NEON_RUNTIME_DATABASE_URL/,
   /postgres(?:ql)?:\/\//i,
   /sk_(?:test|live)_/,
 ];

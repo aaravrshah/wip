@@ -28,38 +28,35 @@ describe('server environment selection', () => {
   test('requires server database configuration when Neon is selected', () => {
     expect(() =>
       parseServerEnvironment({ NODE_ENV: 'development', WIP_DATA_SOURCE: 'neon' }),
-    ).toThrow(/requires neon_authenticated_database_url and the clerk/i);
+    ).toThrow(/requires neon_runtime_database_url and the clerk/i);
   });
 
-  test('requires the passwordless authenticated Neon role', () => {
+  test('requires the least-privilege password-protected runtime role', () => {
     expect(() =>
       parseServerEnvironment({
         NODE_ENV: 'development',
         WIP_DATA_SOURCE: 'neon',
-        NEON_AUTHENTICATED_DATABASE_URL:
+        NEON_RUNTIME_DATABASE_URL:
           'postgresql://owner:password@example-pooler.invalid/placeholder?sslmode=require',
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_placeholder',
         CLERK_SECRET_KEY: 'sk_test_placeholder',
       }),
-    ).toThrow(/authenticated database role/i);
+    ).toThrow(/wip_runtime database role/i);
   });
 
-  test('returns validated authenticated Neon settings without an owner override', () => {
+  test('returns validated runtime Neon settings without an owner override', () => {
+    const runtimeDatabaseUrl = `postgresql://wip_runtime:${'a'.repeat(64)}@example-pooler.invalid/placeholder?sslmode=require`;
     expect(
       parseServerEnvironment({
         NODE_ENV: 'development',
         WIP_DATA_SOURCE: 'neon',
-        NEON_AUTHENTICATED_DATABASE_URL:
-          'postgresql://authenticated@example-pooler.invalid/placeholder?sslmode=require',
+        NEON_RUNTIME_DATABASE_URL: runtimeDatabaseUrl,
         NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: 'pk_test_placeholder',
         CLERK_SECRET_KEY: 'sk_test_placeholder',
-        CLERK_JWT_TEMPLATE: 'wip-neon',
       }),
     ).toEqual({
       dataSource: 'neon',
-      authenticatedDatabaseUrl:
-        'postgresql://authenticated@example-pooler.invalid/placeholder?sslmode=require',
-      clerkJwtTemplate: 'wip-neon',
+      runtimeDatabaseUrl,
     });
   });
 

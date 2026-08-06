@@ -11,8 +11,8 @@ async function getRepository(): Promise<ApplicationRepository> {
 
   const identity = await requireAuthenticatedDatabaseIdentity();
   return createAuthenticatedNeonApplicationRepository({
-    authenticatedDatabaseUrl: environment.authenticatedDatabaseUrl,
-    databaseToken: identity.databaseToken,
+    runtimeDatabaseUrl: environment.runtimeDatabaseUrl,
+    clerkUserId: identity.clerkUserId,
   });
 }
 
@@ -22,8 +22,8 @@ export async function createApplicationRepositoryForApiRequest(): Promise<Applic
 
   const identity = await requireApiDatabaseIdentity();
   return createAuthenticatedNeonApplicationRepository({
-    authenticatedDatabaseUrl: environment.authenticatedDatabaseUrl,
-    databaseToken: identity.databaseToken,
+    runtimeDatabaseUrl: environment.runtimeDatabaseUrl,
+    clerkUserId: identity.clerkUserId,
   });
 }
 

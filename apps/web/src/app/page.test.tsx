@@ -10,9 +10,7 @@ vi.mock('@/auth/server', () => ({ hasAuthenticatedSession }));
 vi.mock('@/env/server', () => ({
   getServerEnvironment: () => ({
     dataSource: 'neon',
-    authenticatedDatabaseUrl:
-      'postgresql://authenticated@example-pooler.invalid/wip?sslmode=require',
-    clerkJwtTemplate: 'neon',
+    runtimeDatabaseUrl: `postgresql://wip_runtime:${'a'.repeat(64)}@example-pooler.invalid/wip?sslmode=require`,
   }),
 }));
 vi.mock('@/data', () => ({

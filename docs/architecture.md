@@ -8,7 +8,7 @@ Decision horizon: optimize Milestones 1–2; preserve clean boundaries for Miles
 
 Use a TypeScript monorepo with four explicit product boundaries, but deploy only what the current milestone needs:
 
-1. **Web system of record:** Next.js App Router on Vercel, backed by Neon PostgreSQL, with Clerk authentication and Neon-verified Clerk JWTs enforcing PostgreSQL RLS.
+1. **Web system of record:** Next.js App Router on Vercel, backed by Neon PostgreSQL, with Clerk authentication and server-established transaction identity enforcing PostgreSQL RLS.
 2. **Extension capture layer:** Chrome Manifest V3 extension built with WXT, using a popup and user-invoked `activeTab` extraction.
 3. **Inbound-email processing:** a separate Cloudflare Email Worker, private R2 transient storage, and queue consumer added in Milestone 3.
 4. **Aggregate analytics:** isolated Postgres schemas and scheduled derivation jobs added in Milestone 4; move to a warehouse only when scale or query isolation justifies it.
@@ -27,8 +27,8 @@ flowchart LR
     Extension -->|"reviewed snapshot over /api/v1"| WebAPI
     Extension -->|"standalone Native API session"| Auth
     WebAPI --> DB["Neon PostgreSQL\nsystem of record"]
-    Auth["Clerk\nGoogle + email links"] -->|"verified session + custom JWT"| WebAPI
-    Auth -->|"JWKS"| DB
+    Auth["Clerk\nGoogle + email links"] -->|"verified session / Bearer token"| WebAPI
+    WebAPI -->|"transaction-local verified subject"| DB
 
     Mail["Forwarded recruiting email"] --> EmailWorker["Email routing Worker\nverify recipient + store transiently"]
     EmailWorker --> Raw["Private R2\nshort TTL"]
@@ -90,11 +90,11 @@ Official references: [Next.js App Router](https://nextjs.org/docs/app), [Next.js
 
 | Option | Advantages | Costs / risks | Decision |
 | --- | --- | --- | --- |
-| Neon Postgres + Clerk | Serverless PostgreSQL, branching, auto-waking idle computes, managed Google/email authentication, and Neon-supported JWT/JWKS RLS. | Two vendors must be configured consistently; custom JWT, audience, database grants, and RLS policies require live integration testing. | **Selected by C-022 and C-025–C-027.** Use Drizzle and Neon's HTTP driver server-side. Clerk authenticates; PostgreSQL authorizes rows. |
+| Neon Postgres + Clerk | Serverless PostgreSQL, branching, auto-waking idle computes, managed Google/email authentication, and standard PostgreSQL RLS. | Two vendors must be configured consistently; the server must establish verified identity transactionally and the runtime role/password must remain separate from owner tooling. | **Selected by C-022, C-025, and C-046.** Use Drizzle and Neon's serverless driver server-side. Clerk authenticates; PostgreSQL authorizes rows. |
 | Supabase Postgres + Auth | Full PostgreSQL with integrated passwordless/social auth and RLS-aware JWT integration. | Couples the database and auth platform; inactive free projects can require restoration behavior that the owner does not want for this project. | **Superseded.** Retained for decision history; do not add new Supabase dependencies or project structure. |
 | SQLite/server-local database | Very cheap and simple locally. | Multi-device accounts, serverless deployment, concurrency, backups, RLS, and later worker access require an early migration. | Development fixture only, not the product database. |
 
-Neon's serverless driver provides HTTP and WebSocket transports. Wip uses HTTP for request-local reads and writes and supplies Clerk's custom JWT through the driver's `authToken` option. Drizzle's Neon HTTP `batch` API sends the fixed statements of a command as one non-interactive transaction, which is sufficient for application creation and event/projection writes without adding a WebSocket session. If a later command requires interactive branching between statements, review the transport deliberately rather than mixing transaction models. Neon validates the JWT against the configured Clerk JWKS and exposes the verified subject through `auth.user_id()`. Runtime requests use the passwordless pooled `authenticated@` URL; privileged seed tooling uses `DATABASE_URL`; drizzle-kit alone uses the direct `DIRECT_DATABASE_URL`. Official references: [Neon serverless driver and transactions](https://neon.com/docs/serverless/serverless-driver), [Drizzle batch API](https://orm.drizzle.team/docs/batch-api), [Neon RLS](https://neon.com/docs/guides/row-level-security), [Clerk Next.js auth](https://clerk.com/docs/reference/nextjs/app-router/auth), [Clerk JWT templates](https://clerk.com/docs/guides/sessions/jwt-templates), and [Drizzle with Neon](https://orm.drizzle.team/docs/get-started/neon-new).
+Neon's serverless driver provides HTTP and WebSocket transports. Privileged migration/seed tooling keeps the existing HTTP/direct paths. Authenticated Wip operations use a request-local WebSocket pool because the existing repository and command services need one interactive transaction: Clerk first verifies the web cookie or extension session token, then the server sets a minimal `{ sub }` claim with transaction-local `set_config`, provisions/derives the owner, performs all reads/writes, commits or rolls back, and closes the pool. Neon's documented self-verification pattern requires a connection role without `BYPASSRLS`; Wip therefore uses the SQL-created `wip_runtime` role rather than the managed Data API `authenticated` role or `neondb_owner`. Runtime uses `NEON_RUNTIME_DATABASE_URL`; fictional seed tooling uses `DATABASE_URL`; drizzle-kit alone uses `DIRECT_DATABASE_URL`. Official references: [Neon serverless driver, self-verified JWT claims, and transactions](https://neon.com/docs/serverless/serverless-driver), [Neon RLS](https://neon.com/docs/guides/row-level-security), [Clerk Next.js auth](https://clerk.com/docs/reference/nextjs/app-router/auth), and [Drizzle with Neon](https://orm.drizzle.team/docs/get-started/neon-new).
 
 ### Monorepo tooling
 
@@ -173,7 +173,7 @@ DELETE /api/v1/tracker
 
 This is the implemented surface through Milestone 2A. Contact and document commands retain the Milestone 1C behavior. `POST /api/v1/captures` accepts one reviewed extension capture, creates a new application/confirmed initial event/immutable snapshot through the existing command service, or returns a typed owner-scoped duplicate without writing. Direct snapshot attachment/recapture, event proposal confirmation/rejection, and Clerk-account deletion remain later additions. Application creation may include one optional manually pasted snapshot. Create, stage-event, and capture requests require an `Idempotency-Key`; other mutations use explicit row versions where stale overwrites are possible. Do not expose arbitrary event payload writes; accept a discriminated, validated command schema per event type.
 
-Exports stream directly from an owner-scoped read service: JSON uses the versioned `wip.tracker.export` envelope and CSV contains the applications projection with spreadsheet-formula prefixes neutralized. Wip does not persist export artifacts. Whole-tracker deletion requires the exact phrase `DELETE MY WIP DATA` and calls a zero-argument `SECURITY DEFINER` database function. The function derives the current owner from Neon's verified JWT, deletes applications/documents/contacts in one database transaction, resets tracker preferences, and retains only the owner-to-Clerk mapping so the independent authentication account remains usable.
+Exports stream directly from an owner-scoped read service: JSON uses the versioned `wip.tracker.export` envelope and CSV contains the applications projection with spreadsheet-formula prefixes neutralized. Wip does not persist export artifacts. Whole-tracker deletion requires the exact phrase `DELETE MY WIP DATA` and calls a zero-argument `SECURITY DEFINER` database function. The function derives the current owner from the transaction-local verified subject, deletes applications/documents/contacts in the same database transaction, resets tracker preferences, and retains only the owner-to-Clerk mapping so the independent authentication account remains usable.
 
 Unsafe cookie-authenticated web requests require an exact matching `Origin`, reject non-`same-origin` Fetch Metadata when present, and accept JSON only where a body is expected. Extension capture instead requires a syntactically valid Bearer header, Clerk's verified normal `session_token`, an exact `chrome-extension://` origin from `WIP_EXTENSION_ORIGINS`, and reflected non-wildcard CORS/preflight headers. The server bounds the streamed JSON body, validates strict Zod command schemas, derives identity only from Clerk, and returns stable `{ error: { code, message, fields? } }` bodies. Routes are thin adapters; reusable command services own persistence rules.
 
@@ -182,11 +182,11 @@ Unsafe cookie-authenticated web requests require an exact matching `Origin`, rej
 - Put event taxonomy, stage reduction, confirmation policy, due/stale calculations, and aggregate eligibility into pure functions in `packages/domain`.
 - Put serializable input/output schemas in `packages/schemas` using a runtime validator such as Zod.
 - Define the PostgreSQL model in `packages/database` with Drizzle's TypeScript schema and generate reviewable SQL migrations with drizzle-kit. Check both the schema and generated SQL into source control. Production changes run `drizzle-kit migrate`; automatic schema pushing is not a production strategy.
-- Perform initial application/event/snapshot/action insertion and stage-event/projection updates atomically with Neon HTTP/Drizzle batch transactions. Preserve user-supplied `occurred_at` separately from database `created_at`.
-- Every user-owned table has a non-null `owner_id`; composite keys prevent cross-owner relationships and repository predicates provide defense in depth. All 11 owner/identity tables enable and force RLS. The ten owned-table policies compare `owner_id` with the internal UUID returned by `wip_current_owner_id()`; the `owners` policy compares its Clerk subject directly with Neon-verified `auth.user_id()`.
-- Authenticated web requests never accept `owner_id` or auth subject as caller input. Their request-local repository/command service gets a Clerk custom JWT server-side and connects with `NEON_AUTHENTICATED_DATABASE_URL`. The passwordless `authenticated` role is `NOBYPASSRLS`; it retains SELECT, can execute only the zero-argument provisioning and tracker-deletion functions, and has operation/column grants only for implemented commands. Immutable events and snapshots receive INSERT but no UPDATE/DELETE grant; immutable document versions receive INSERT but no UPDATE/DELETE grant.
+- Perform each authenticated repository/command operation atomically inside its identity-establishing Neon transaction. Preserve user-supplied `occurred_at` separately from database `created_at`.
+- Every user-owned table has a non-null `owner_id`; composite keys prevent cross-owner relationships and repository predicates provide defense in depth. All 11 owner/identity tables enable and force RLS. The ten owned-table policies compare `owner_id` with the internal UUID returned by `wip_current_owner_id()`; the `owners` policy compares its Clerk subject with `wip_clerk_subject()` from the current transaction only.
+- Authenticated web requests never accept `owner_id` or auth subject as caller input. Clerk supplies the verified subject to the server-only request context. `wip_runtime` is SQL-created, password-protected, non-elevated, and `NOBYPASSRLS`; it receives SELECT, the zero-argument functions, and operation/column grants only for implemented commands. Immutable events and snapshots receive INSERT but no UPDATE/DELETE grant; immutable document versions receive INSERT but no UPDATE/DELETE grant.
 - `DATABASE_URL`, `DIRECT_DATABASE_URL`, `CLERK_SECRET_KEY`, and privileged database access are server-only. `DATABASE_URL` is seed-only, `DIRECT_DATABASE_URL` is migration-only, and neither is normal web runtime configuration. No database URL or secret can use a `NEXT_PUBLIC_` prefix, enter a browser bundle, or be sent to the extension.
-- The JWT is supplied per Neon HTTP request, so verified identity is not stored in a caller-controlled PostgreSQL setting or a reusable pooled SQL session. Missing, malformed, expired, wrong-audience, or otherwise invalid tokens fail closed at Clerk/Neon before data is returned.
+- Identity is set only after Clerk verification and with PostgreSQL's transaction-local flag. The connection is request-local and closed before returning, so claims cannot survive commit/rollback or cross users. Missing or invalid Clerk authentication fails closed before a runtime transaction opens.
 - Application and editable child versions provide stale-write detection. Create/stage idempotency keys are owner-unique, and the stage projector orders confirmed events by effective time, server creation time, and stable event ID.
 
 ## 6. Extension capture layer
@@ -198,7 +198,7 @@ Unsafe cookie-authenticated web requests require an exact matching `Origin`, rej
 3. The extractor finds likely job-description content using semantic elements, JSON-LD `JobPosting`, and bounded generic heuristics. Site-specific adapters are optional and isolated.
 4. The popup shows title, company, location, source URL, and captured description with warnings for missing/ambiguous fields.
 5. The user edits company, role, location, canonical stage, and optional metadata, then explicitly saves.
-6. The extension sends the reviewed capture to the exact Wip API origin with an on-demand Clerk session token and idempotency key. The server validates and sanitizes again, hashes normalized text, and inserts the application, confirmed extension event, and immutable snapshot in one Neon HTTP batch transaction.
+6. The extension sends the reviewed capture to the exact Wip API origin with an on-demand Clerk session token and idempotency key. The server verifies, validates, and sanitizes again, hashes normalized text, and inserts the application, confirmed extension event, and immutable snapshot inside one identity-establishing Neon transaction.
 7. A conservative existing URL or requisition/company match returns a typed duplicate and an open-existing action; it never overwrites or appends a snapshot in 2A.
 8. The extension clears transient page content from `chrome.storage.session` after success or explicit cancel. A recoverable error preserves the reviewed draft for retry.
 
@@ -222,9 +222,9 @@ Do not request `tabs`, `identity`, `history`, `cookies`, `webRequest`, `declarat
 
 Clerk is the web identity provider. Initial methods are Google and passwordless email verification links, rendered with Clerk's prebuilt Next.js components. Next.js 16 uses `proxy.ts` with `clerkMiddleware()` to expose verified session state; each protected page and data function still checks authentication next to the resource with `auth()`/`auth.protect()`. The public root renders an intentional signed-out landing instead of tracker data.
 
-Clerk's immutable `sub` is stored once on the provider-neutral internal owner. First authenticated access calls `wip_provision_owner()` with no arguments; the security-definer function reads only Neon-verified `auth.user_id()` and returns the existing/new internal UUID. A unique Clerk-subject index makes retries and concurrent first requests idempotent. New owners remain empty, and the seed owner has no auth subject.
+Clerk's immutable `sub` is stored once on the provider-neutral internal owner. First authenticated access calls `wip_provision_owner()` with no arguments inside the identity-establishing transaction; the security-definer function reads only `wip_clerk_subject()` and returns the existing/new internal UUID. A unique Clerk-subject index makes retries and concurrent first requests idempotent. New owners remain empty, and the seed owner has no auth subject.
 
-Milestone 2A uses `@clerk/chrome-extension` in standalone popup mode (`standardBrowser={false}`). Clerk's current matrix supports email OTP/password/passkey in this mode but not OAuth or email-link redirects. Wip therefore requires the developer to enable Clerk Native API and email verification code; Google/email-link sign-in remains available on the web. The popup calls `getToken({ skipCache: true })` only when the user confirms Save and sends the normal Clerk session token as `Authorization: Bearer`; Wip code never writes or logs that JWT. The capture Route Handler uses `auth({ acceptsToken: 'session_token' })`, then requests the existing custom `neon` token server-side for RLS. The caller never sees the Neon JWT or a database URL.
+Milestone 2A uses `@clerk/chrome-extension` in standalone popup mode (`standardBrowser={false}`). Clerk's current matrix supports email OTP/password/passkey in this mode but not OAuth or email-link redirects. Wip therefore requires the developer to enable Clerk Native API and email verification code; Google/email-link sign-in remains available on the web. The popup calls `getToken({ skipCache: true })` only when the user confirms Save and sends the normal Clerk session token as `Authorization: Bearer`; Wip code never writes or logs that JWT. The capture Route Handler verifies it with `auth({ acceptsToken: 'session_token' })` and passes the resulting subject only into the server-side transaction boundary. The caller never sees database claims, credentials, or URLs.
 
 Clerk's Sync Host would share web authentication, but its documented manifest requires `cookies`. That conflicts with C-040, so Sync Host is not configured and opening web sign-in does not silently synchronize the extension session. Before external beta, verify the SDK's internal session-at-rest behavior, Native API abuse controls, revocation/sign-out behavior, and the production extension's stable CRX ID/allowed origin. References: [Clerk Chrome Extension SDK](https://clerk.com/docs/reference/chrome-extension/overview), [Native API setup](https://clerk.com/docs/guides/development/deployment/chrome-extension), [Sync Host](https://clerk.com/docs/guides/sessions/sync-host), and [Clerk-authenticated Next.js Route Handlers](https://clerk.com/docs/reference/nextjs/app-router/route-handlers).
 
@@ -279,14 +279,14 @@ PostgreSQL is adequate for early batch aggregates. Move private facts to a dedic
 ### Milestone 1B-1
 
 - Add one Neon development branch/database, Drizzle schema, checked-in SQL migrations, an idempotent fictional seed, and a Neon-backed read repository.
-- During 1B-1, `DATABASE_URL` served the fictional pooled read/seed path and `DIRECT_DATABASE_URL` served migrations. Milestone 1B-2 supersedes normal runtime use of `DATABASE_URL` with the passwordless authenticated URL. Use a separate disposable Neon branch for integration tests.
+- During 1B-1, `DATABASE_URL` served the fictional pooled read/seed path and `DIRECT_DATABASE_URL` served migrations. C-046 supersedes normal runtime use of `DATABASE_URL` with the password-protected, least-privilege `NEON_RUNTIME_DATABASE_URL`. Use a separate disposable Neon branch for integration tests.
 - Keep the in-memory demo source available only through explicit configuration. In production mode it must fail closed unless a deliberate build/demo override is supplied; missing database credentials must not silently select demo data.
 - Do not deploy, configure authentication, expose mutations, or invite real-user data during this slice.
 
 ### Milestone 1B-2
 
-- Add Clerk with Google and email-link authentication, map verified subjects idempotently to internal owners, create the least-privilege `authenticated` database role, and enforce/test PostgreSQL RLS.
-- Use `NEON_AUTHENTICATED_DATABASE_URL` only for request-time authenticated reads. Keep `DATABASE_URL` limited to seed tooling and `DIRECT_DATABASE_URL` limited to migrations.
+- Add Clerk with Google and email-link authentication, map verified subjects idempotently to internal owners, create the least-privilege `wip_runtime` database role, and enforce/test PostgreSQL RLS.
+- Use `NEON_RUNTIME_DATABASE_URL` only for request-time authenticated operations. Keep `DATABASE_URL` limited to seed tooling and `DIRECT_DATABASE_URL` limited to migrations.
 - Preserve the explicit local/test demo and read-only product. Do not add mutations, `/api/v1`, deployment, or real-user beta data in this slice.
 
 ### Milestone 1B-3
@@ -360,14 +360,14 @@ Milestone 1B-1 gate (resolved 2026-08-04):
 Milestone 1B-2 gate (resolved 2026-08-04):
 
 - use Clerk with Google and passwordless email links;
-- use a Clerk custom JWT with a fixed audience and register its JWKS with Neon RLS;
+- verify Clerk sessions in Next.js and establish their verified subject only inside the database transaction, as amended by C-046;
 - map verified Clerk subjects to unique internal owner UUIDs through a zero-argument idempotent database function;
-- enable and force RLS for every owner/identity table; use a passwordless, `NOBYPASSRLS`, read-only authenticated role; and
+- enable and force RLS for every owner/identity table; use a password-protected, `NOBYPASSRLS`, least-privilege runtime role; and
 - keep the product read-only and the demo source explicit.
 
 Milestone 1B-3 gate (resolved 2026-08-05):
 
-- use Neon HTTP/Drizzle batch transactions for fixed multi-statement commands and retain the Clerk JWT-authenticated path for every real-user write;
+- run commands inside request-local Neon transactions that establish server-verified identity before every real-user read/write, as amended by C-046;
 - expose only the versioned application, manual-stage, note, next-action, and confirmed deletion commands in this slice;
 - require same-origin JSON mutation requests, bounded strict schemas, stable errors, create/event idempotency, and row versions for stale-write protection;
 - add narrow write RLS and grants without permitting event or snapshot updates/deletes; and

@@ -8,13 +8,14 @@ import { DEMO_OWNER_ID, seedDemoData } from '@wip/database/seed';
 import {
   applications,
   applicationEvents,
-  createAuthenticatedDatabase,
   createDatabase,
   documentVersions,
   jobDescriptionSnapshots,
   nextActions,
   notes,
   owners,
+  withTenantDatabase,
+  type WipDatabase,
 } from '@wip/database';
 import type { Application } from '@wip/domain';
 import { extensionCaptureCommandSchema } from '@wip/schemas';
@@ -36,18 +37,45 @@ import { NeonTrackerDataService } from '@/services/tracker-data-service';
 
 const testDatabaseUrl = process.env.TEST_DATABASE_URL;
 const testWithDatabase = testDatabaseUrl ? test : test.skip;
-const authenticatedDatabaseUrl = process.env.TEST_NEON_AUTHENTICATED_DATABASE_URL;
-const userAToken = process.env.TEST_CLERK_USER_A_JWT;
-const userBToken = process.env.TEST_CLERK_USER_B_JWT;
-const expiredToken = process.env.TEST_CLERK_EXPIRED_JWT;
+const runtimeDatabaseUrl = process.env.TEST_NEON_RUNTIME_DATABASE_URL;
+const userASubject = process.env.TEST_CLERK_USER_A_ID;
+const userBSubject = process.env.TEST_CLERK_USER_B_ID;
 const hasAuthenticatedTestConfiguration = Boolean(
-  testDatabaseUrl && authenticatedDatabaseUrl && userAToken && userBToken,
+  testDatabaseUrl && runtimeDatabaseUrl && userASubject && userBSubject,
 );
 const testWithAuthenticatedDatabase = hasAuthenticatedTestConfiguration ? test : test.skip;
 const migrationDirectory = resolve(
   dirname(fileURLToPath(import.meta.url)),
   '../../../../packages/database/drizzle',
 );
+
+async function withTestTenant<T>(
+  clerkSubject: string,
+  operation: (database: WipDatabase, ownerId: string) => Promise<T>,
+): Promise<T> {
+  return withTenantDatabase(runtimeDatabaseUrl!, clerkSubject, async (database) => {
+    const ownerId = await provisionAuthenticatedOwner(database);
+    return operation(database, ownerId);
+  });
+}
+
+function tenantService<T extends object>(
+  clerkSubject: string,
+  createService: (database: WipDatabase, ownerId: string) => T,
+): T {
+  return new Proxy({} as T, {
+    get:
+      (_target, property) =>
+      (...args: unknown[]) =>
+        withTestTenant(clerkSubject, async (database, ownerId) => {
+          const service = createService(database, ownerId);
+          const method = Reflect.get(service, property);
+          if (typeof method !== 'function')
+            throw new Error(`Unknown service method: ${String(property)}`);
+          return Reflect.apply(method, service, args);
+        }),
+  });
+}
 
 describe('Neon persistence integration', () => {
   const database = testDatabaseUrl ? createDatabase(testDatabaseUrl) : undefined;
@@ -282,8 +310,6 @@ describe.sequential('Neon Clerk RLS integration', () => {
   let managedApplicationId: string;
   let ownerAId: string;
   let ownerBId: string;
-  let userADatabase: ReturnType<typeof createAuthenticatedDatabase>;
-  let userBDatabase: ReturnType<typeof createAuthenticatedDatabase>;
   let serviceA: NeonApplicationCommandService;
   let serviceB: NeonApplicationCommandService;
   let metadataServiceA: NeonMetadataCommandService;
@@ -295,15 +321,28 @@ describe.sequential('Neon Clerk RLS integration', () => {
 
     await migrate(database, { migrationsFolder: migrationDirectory });
 
-    userADatabase = createAuthenticatedDatabase(authenticatedDatabaseUrl!, userAToken!);
-    userBDatabase = createAuthenticatedDatabase(authenticatedDatabaseUrl!, userBToken!);
-    ownerAId = await provisionAuthenticatedOwner(userADatabase);
-    ownerBId = await provisionAuthenticatedOwner(userBDatabase);
-    serviceA = new NeonApplicationCommandService(userADatabase, ownerAId);
-    serviceB = new NeonApplicationCommandService(userBDatabase, ownerBId);
-    metadataServiceA = new NeonMetadataCommandService(userADatabase, ownerAId);
-    metadataServiceB = new NeonMetadataCommandService(userBDatabase, ownerBId);
-    trackerDataServiceA = new NeonTrackerDataService(userADatabase, ownerAId);
+    ownerAId = await withTestTenant(userASubject!, async (_database, ownerId) => ownerId);
+    ownerBId = await withTestTenant(userBSubject!, async (_database, ownerId) => ownerId);
+    serviceA = tenantService(
+      userASubject!,
+      (tenantDatabase, ownerId) => new NeonApplicationCommandService(tenantDatabase, ownerId),
+    );
+    serviceB = tenantService(
+      userBSubject!,
+      (tenantDatabase, ownerId) => new NeonApplicationCommandService(tenantDatabase, ownerId),
+    );
+    metadataServiceA = tenantService(
+      userASubject!,
+      (tenantDatabase, ownerId) => new NeonMetadataCommandService(tenantDatabase, ownerId),
+    );
+    metadataServiceB = tenantService(
+      userBSubject!,
+      (tenantDatabase, ownerId) => new NeonMetadataCommandService(tenantDatabase, ownerId),
+    );
+    trackerDataServiceA = tenantService(
+      userASubject!,
+      (tenantDatabase, ownerId) => new NeonTrackerDataService(tenantDatabase, ownerId),
+    );
 
     await database
       .insert(applications)
@@ -373,8 +412,10 @@ describe.sequential('Neon Clerk RLS integration', () => {
   }, 60_000);
 
   testWithAuthenticatedDatabase('provisions the same internal owner idempotently', async () => {
-    const userADatabase = createAuthenticatedDatabase(authenticatedDatabaseUrl!, userAToken!);
-    const repeatedOwnerId = await provisionAuthenticatedOwner(userADatabase);
+    const repeatedOwnerId = await withTestTenant(
+      userASubject!,
+      async (_database, ownerId) => ownerId,
+    );
 
     expect(repeatedOwnerId).toBe(ownerAId);
     expect(ownerAId).not.toBe(ownerBId);
@@ -513,8 +554,8 @@ describe.sequential('Neon Clerk RLS integration', () => {
     'audits meaningful fact edits and rejects stale updates',
     async () => {
       const repository = await createAuthenticatedNeonApplicationRepository({
-        authenticatedDatabaseUrl: authenticatedDatabaseUrl!,
-        databaseToken: userAToken!,
+        runtimeDatabaseUrl: runtimeDatabaseUrl!,
+        clerkUserId: userASubject!,
       });
       const before = await repository.getApplicationById(managedApplicationId);
       expect(before).toBeDefined();
@@ -599,10 +640,12 @@ describe.sequential('Neon Clerk RLS integration', () => {
       expect(backdatedEvent!.createdAt).not.toBe(backdatedEvent!.occurredAt);
 
       await expect(
-        userADatabase
-          .update(applicationEvents)
-          .set({ title: 'An impermissible history rewrite' })
-          .where(eq(applicationEvents.id, backdatedEvent!.id)),
+        withTestTenant(userASubject!, (tenantDatabase) =>
+          tenantDatabase
+            .update(applicationEvents)
+            .set({ title: 'An impermissible history rewrite' })
+            .where(eq(applicationEvents.id, backdatedEvent!.id)),
+        ),
       ).rejects.toThrow();
     },
   );
@@ -766,10 +809,12 @@ describe.sequential('Neon Clerk RLS integration', () => {
       });
 
       await expect(
-        userADatabase
-          .update(documentVersions)
-          .set({ versionLabel: 'impermissible rewrite' })
-          .where(eq(documentVersions.id, firstUse.documentVersionId!)),
+        withTestTenant(userASubject!, (tenantDatabase) =>
+          tenantDatabase
+            .update(documentVersions)
+            .set({ versionLabel: 'impermissible rewrite' })
+            .where(eq(documentVersions.id, firstUse.documentVersionId!)),
+        ),
       ).rejects.toThrow();
 
       updated = await metadataServiceA.deleteDocumentUse('fictional-rls-user-a', firstUse.useId!);
@@ -794,18 +839,19 @@ describe.sequential('Neon Clerk RLS integration', () => {
   testWithAuthenticatedDatabase(
     'isolates two users even when the other owner UUID is known',
     async () => {
-      const userADatabase = createAuthenticatedDatabase(authenticatedDatabaseUrl!, userAToken!);
-      const guessedRows = await userADatabase
-        .select({ id: applications.id })
-        .from(applications)
-        .where(eq(applications.ownerId, ownerBId));
+      const guessedRows = await withTestTenant(userASubject!, (tenantDatabase) =>
+        tenantDatabase
+          .select({ id: applications.id })
+          .from(applications)
+          .where(eq(applications.ownerId, ownerBId)),
+      );
       const userARepository = await createAuthenticatedNeonApplicationRepository({
-        authenticatedDatabaseUrl: authenticatedDatabaseUrl!,
-        databaseToken: userAToken!,
+        runtimeDatabaseUrl: runtimeDatabaseUrl!,
+        clerkUserId: userASubject!,
       });
       const userBRepository = await createAuthenticatedNeonApplicationRepository({
-        authenticatedDatabaseUrl: authenticatedDatabaseUrl!,
-        databaseToken: userBToken!,
+        runtimeDatabaseUrl: runtimeDatabaseUrl!,
+        clerkUserId: userBSubject!,
       });
 
       expect(guessedRows).toEqual([]);
@@ -903,8 +949,8 @@ describe.sequential('Neon Clerk RLS integration', () => {
     'does not expose the fictional demo seed to authenticated users',
     async () => {
       const repository = await createAuthenticatedNeonApplicationRepository({
-        authenticatedDatabaseUrl: authenticatedDatabaseUrl!,
-        databaseToken: userAToken!,
+        runtimeDatabaseUrl: runtimeDatabaseUrl!,
+        clerkUserId: userASubject!,
       });
       const visibleApplications = await repository.listApplications();
 
@@ -946,8 +992,14 @@ describe.sequential('Neon Clerk RLS integration', () => {
           warnings: [],
         },
       });
-      const serviceA = new NeonExtensionCaptureService(userADatabase, ownerAId);
-      const serviceB = new NeonExtensionCaptureService(userBDatabase, ownerBId);
+      const serviceA = tenantService(
+        userASubject!,
+        (tenantDatabase, ownerId) => new NeonExtensionCaptureService(tenantDatabase, ownerId),
+      );
+      const serviceB = tenantService(
+        userBSubject!,
+        (tenantDatabase, ownerId) => new NeonExtensionCaptureService(tenantDatabase, ownerId),
+      );
       const idempotencyKey = `extension-integration:${mutationRunId}`;
 
       const first = await serviceA.capture(command, idempotencyKey);
@@ -1023,48 +1075,11 @@ describe.sequential('Neon Clerk RLS integration', () => {
     async () => {
       await expect(
         createAuthenticatedNeonApplicationRepository({
-          authenticatedDatabaseUrl: authenticatedDatabaseUrl!,
-          databaseToken: '',
+          runtimeDatabaseUrl: runtimeDatabaseUrl!,
+          clerkUserId: '',
         }),
-      ).rejects.toThrow(/verified database token/i);
-
-      await expect(
-        createAuthenticatedNeonApplicationRepository({
-          authenticatedDatabaseUrl: authenticatedDatabaseUrl!,
-          databaseToken: 'not-a-valid-jwt',
-        }),
-      ).rejects.toThrow();
+      ).rejects.toThrow(/verified Clerk subject/i);
     },
-  );
-
-  testWithAuthenticatedDatabase(
-    'fails closed when a valid token signature is changed',
-    async () => {
-      const tokenParts = userAToken!.split('.');
-      const signature = tokenParts[2]!;
-      tokenParts[2] = `${signature.startsWith('a') ? 'b' : 'a'}${signature.slice(1)}`;
-      const invalidSignatureToken = tokenParts.join('.');
-
-      await expect(
-        createAuthenticatedNeonApplicationRepository({
-          authenticatedDatabaseUrl: authenticatedDatabaseUrl!,
-          databaseToken: invalidSignatureToken,
-        }),
-      ).rejects.toThrow();
-    },
-  );
-
-  (expiredToken ? test : test.skip)(
-    'fails closed for an expired Clerk JWT',
-    async () => {
-      await expect(
-        createAuthenticatedNeonApplicationRepository({
-          authenticatedDatabaseUrl: authenticatedDatabaseUrl!,
-          databaseToken: expiredToken!,
-        }),
-      ).rejects.toThrow();
-    },
-    30_000,
   );
 
   testWithAuthenticatedDatabase(
@@ -1086,8 +1101,8 @@ describe.sequential('Neon Clerk RLS integration', () => {
       });
 
       const repository = await createAuthenticatedNeonApplicationRepository({
-        authenticatedDatabaseUrl: authenticatedDatabaseUrl!,
-        databaseToken: userAToken!,
+        runtimeDatabaseUrl: runtimeDatabaseUrl!,
+        clerkUserId: userASubject!,
       });
       await expect(repository.getApplicationById(managedApplicationId)).resolves.toBeUndefined();
       const dependentCounts = await Promise.all(
@@ -1114,12 +1129,12 @@ describe.sequential('Neon Clerk RLS integration', () => {
         confirmation: 'DELETE MY WIP DATA',
       });
       const repositoryA = await createAuthenticatedNeonApplicationRepository({
-        authenticatedDatabaseUrl: authenticatedDatabaseUrl!,
-        databaseToken: userAToken!,
+        runtimeDatabaseUrl: runtimeDatabaseUrl!,
+        clerkUserId: userASubject!,
       });
       const repositoryB = await createAuthenticatedNeonApplicationRepository({
-        authenticatedDatabaseUrl: authenticatedDatabaseUrl!,
-        databaseToken: userBToken!,
+        runtimeDatabaseUrl: runtimeDatabaseUrl!,
+        clerkUserId: userBSubject!,
       });
 
       expect(result.applicationsDeleted).toBeGreaterThanOrEqual(1);
@@ -1127,7 +1142,9 @@ describe.sequential('Neon Clerk RLS integration', () => {
       await expect(repositoryA.listContacts()).resolves.toEqual([]);
       await expect(repositoryA.listDocuments()).resolves.toEqual([]);
       await expect(repositoryB.getApplicationById('fictional-rls-user-b')).resolves.toBeDefined();
-      await expect(provisionAuthenticatedOwner(userADatabase)).resolves.toBe(ownerAId);
+      await expect(
+        withTestTenant(userASubject!, async (_database, ownerId) => ownerId),
+      ).resolves.toBe(ownerAId);
       const retainedOwner = await database!.query.owners.findFirst({
         where: eq(owners.id, ownerAId),
       });

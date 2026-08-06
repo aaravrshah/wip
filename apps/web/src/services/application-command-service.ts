@@ -148,31 +148,27 @@ export class NeonApplicationCommandService implements ApplicationCommandService 
       ...(command.appliedAt ? { appliedAt: command.appliedAt } : {}),
     });
 
-    const insertApplication = this.database
-      .insert(applications)
-      .values({
-        id: applicationId,
-        ownerId: this.ownerId,
-        publicId: applicationId,
-        createIdempotencyKey: idempotencyKey,
-        createRequestHash: commandHash,
-        lastMutationId: eventId,
-        companyName: command.company,
-        roleTitle: command.role,
-        locationText: command.location ?? '',
-        workplace: command.workplace,
-        currentStage: command.stage,
-        projectedAppliedAt: command.appliedAt ? new Date(command.appliedAt) : null,
-        lastConfirmedEventAt: new Date(effectiveAt),
-        projectedStageEventId: eventId,
-        projectedStageOccurredAt: new Date(effectiveAt),
-        waitingOn: eventPlan.payload.waitingOn,
-        sourceUrl: command.sourceUrl ?? null,
-        sourceName: command.sourceName ?? null,
-        requisitionId: command.requisitionId ?? null,
-      })
-      .onConflictDoNothing()
-      .returning({ id: applications.id });
+    // Drizzle's values insert includes every insertable table column and fills omitted values with
+    // DEFAULT. Keep this statement explicit so the runtime role needs privileges only for fields
+    // the command service intentionally controls.
+    const insertApplication = this.database.execute(sql`
+      insert into public.applications (
+        id, owner_id, public_id, create_idempotency_key, create_request_hash, last_mutation_id,
+        company_name, role_title, location_text, workplace, current_stage, projected_applied_at,
+        last_confirmed_event_at, projected_stage_event_id, projected_stage_occurred_at, waiting_on,
+        source_url, source_name, requisition_id
+      )
+      values (
+        ${applicationId}::uuid, ${this.ownerId}::uuid, ${applicationId}, ${idempotencyKey},
+        ${commandHash}, ${eventId}::uuid, ${command.company}, ${command.role},
+        ${command.location ?? ''}, ${command.workplace}::workplace,
+        ${command.stage}::application_stage, ${command.appliedAt ?? null}::timestamptz,
+        ${effectiveAt}::timestamptz, ${eventId}::uuid, ${effectiveAt}::timestamptz,
+        ${eventPlan.payload.waitingOn}::waiting_on, ${command.sourceUrl ?? null},
+        ${command.sourceName ?? null}, ${command.requisitionId ?? null}
+      )
+      on conflict do nothing
+    `);
 
     const insertEvent = this.database.execute(sql`
       insert into public.application_events (

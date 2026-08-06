@@ -6,7 +6,7 @@ import {
   applicationEvents,
   applications,
   contacts,
-  createAuthenticatedDatabase,
+  withTenantDatabase,
   documentVersions,
   documents,
   jobDescriptionSnapshots,
@@ -79,20 +79,33 @@ function actionKind(kind: (typeof nextActions.$inferSelect)['kind']): NextAction
 }
 
 export async function createAuthenticatedNeonApplicationRepository({
-  authenticatedDatabaseUrl,
-  databaseToken,
+  runtimeDatabaseUrl,
+  clerkUserId,
 }: {
-  authenticatedDatabaseUrl: string;
-  databaseToken: string;
+  runtimeDatabaseUrl: string;
+  clerkUserId: string;
 }): Promise<ApplicationRepository> {
-  if (!databaseToken.trim()) {
-    throw new Error('A verified database token is required.');
+  if (!clerkUserId.trim()) {
+    throw new Error('A verified Clerk subject is required.');
   }
 
-  const database = createAuthenticatedDatabase(authenticatedDatabaseUrl, databaseToken);
-  const ownerId = await provisionAuthenticatedOwner(database);
+  async function withRepository<T>(
+    operation: (repository: ApplicationRepository) => Promise<T>,
+  ): Promise<T> {
+    return withTenantDatabase(runtimeDatabaseUrl, clerkUserId, async (database) => {
+      const ownerId = await provisionAuthenticatedOwner(database);
+      return operation(createOwnerScopedNeonApplicationRepository(database, ownerId));
+    });
+  }
 
-  return createOwnerScopedNeonApplicationRepository(database, ownerId);
+  return {
+    listApplications: () => withRepository((repository) => repository.listApplications()),
+    getApplicationById: (id) => withRepository((repository) => repository.getApplicationById(id)),
+    listContacts: () => withRepository((repository) => repository.listContacts()),
+    listDocuments: () => withRepository((repository) => repository.listDocuments()),
+    getTimeZone: () => withRepository((repository) => repository.getTimeZone()),
+    getReferenceDate: () => new Date(),
+  };
 }
 
 export async function provisionAuthenticatedOwner(database: Database): Promise<string> {
@@ -108,9 +121,8 @@ export async function provisionAuthenticatedOwner(database: Database): Promise<s
   return ownerId;
 }
 
-// This explicit-owner adapter is reserved for trusted migrations, seed tooling, and integration
-// tests. Authenticated web requests must use createAuthenticatedNeonApplicationRepository so the
-// owner comes from Neon's verified JWT context instead of caller input.
+// This explicit-owner adapter is reserved for one already-authenticated transaction, trusted
+// tooling, and integration tests. Browser input can never select this owner identifier.
 export function createOwnerScopedNeonApplicationRepository(
   database: Database,
   ownerId: string,
