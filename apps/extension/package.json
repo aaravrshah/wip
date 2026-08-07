@@ -1,12 +1,13 @@
 {
   "name": "@wip/extension",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "wxt",
-    "build": "wxt build && node scripts/inspect-build.mjs",
-    "zip": "wxt zip && node scripts/inspect-build.mjs",
+    "generate:icons": "node scripts/generate-icons.mjs",
+    "build": "pnpm generate:icons && wxt build && node scripts/inspect-build.mjs",
+    "zip": "pnpm build && wxt zip && node scripts/inspect-release.mjs",
     "lint": "eslint .",
     "typecheck": "wxt prepare && tsc --noEmit",
     "test": "vitest run"

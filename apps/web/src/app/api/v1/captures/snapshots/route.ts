@@ -11,7 +11,7 @@ import {
 } from '@/api/route-utils';
 import { getExtensionOrigins } from '@/env/server';
 import { createExtensionCaptureServiceForRequest } from '@/services/command-service-factory';
-import { extensionCaptureCommandSchema } from '@wip/schemas';
+import { extensionSnapshotAttachmentCommandSchema } from '@wip/schemas';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,16 +30,10 @@ export async function POST(request: Request) {
     requireBearerAuthorization(request);
     assertJsonContentType(request);
     const idempotencyKey = requireIdempotencyKey(request);
-    const command = await readJson(request, extensionCaptureCommandSchema, 512_000);
+    const command = await readJson(request, extensionSnapshotAttachmentCommandSchema, 512_000);
     const service = await createExtensionCaptureServiceForRequest(origin);
-    const result = await service.capture(command, idempotencyKey);
-    return withExtensionCors(
-      apiData(result, {
-        status: result.status === 'created' && !result.idempotentReplay ? 201 : 200,
-        headers: { location: result.application.path },
-      }),
-      origin,
-    );
+    const result = await service.attachSnapshot(command, idempotencyKey);
+    return withExtensionCors(apiData(result, { status: result.created ? 201 : 200 }), origin);
   } catch (error) {
     const response = apiError(error);
     return origin ? withExtensionCors(response, origin) : response;

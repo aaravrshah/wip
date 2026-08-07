@@ -18,7 +18,10 @@ import {
   type WipDatabase,
 } from '@wip/database';
 import type { Application } from '@wip/domain';
-import { extensionCaptureCommandSchema } from '@wip/schemas';
+import {
+  extensionCaptureCommandSchema,
+  extensionSnapshotAttachmentCommandSchema,
+} from '@wip/schemas';
 import { and, count, eq, sql } from 'drizzle-orm';
 import { migrate } from 'drizzle-orm/neon-http/migrator';
 import { beforeAll, describe, expect, test, vi } from 'vitest';
@@ -1050,6 +1053,48 @@ describe.sequential('Neon Clerk RLS integration', () => {
         matchedOn: expect.arrayContaining(['source_url', 'requisition_id']),
       });
 
+      const attachment = extensionSnapshotAttachmentCommandSchema.parse({
+        ...command,
+        applicationId: first.application.id,
+        descriptionHtml:
+          '<section><h2>Updated</h2><p>Preserve a second fictional description version.</p></section>',
+        descriptionText: 'Updated\n\nPreserve a second fictional description version.',
+      });
+      const attachmentKey = `extension-snapshot:${mutationRunId}`;
+      await expect(serviceA.attachSnapshot(attachment, attachmentKey)).resolves.toMatchObject({
+        status: 'snapshot_attached',
+        created: true,
+        idempotentReplay: false,
+      });
+      await expect(serviceA.attachSnapshot(attachment, attachmentKey)).resolves.toMatchObject({
+        status: 'snapshot_attached',
+        created: false,
+        idempotentReplay: true,
+      });
+      const racedAttachment = extensionSnapshotAttachmentCommandSchema.parse({
+        ...attachment,
+        descriptionHtml:
+          '<section><h2>Race-safe update</h2><p>Keep only one immutable copy.</p></section>',
+        descriptionText: 'Race-safe update\n\nKeep only one immutable copy.',
+      });
+      const racedAttachments = await Promise.all([
+        serviceA.attachSnapshot(racedAttachment, `extension-snapshot-race-a:${mutationRunId}`),
+        serviceA.attachSnapshot(racedAttachment, `extension-snapshot-race-b:${mutationRunId}`),
+      ]);
+      expect(racedAttachments.map((result) => result.created).sort()).toEqual([false, true]);
+
+      const raceCommand = extensionCaptureCommandSchema.parse({
+        ...command,
+        sourceUrl: `https://jobs.example.invalid/race/${mutationRunId}`,
+        canonicalUrl: `https://jobs.example.invalid/race/${mutationRunId}`,
+        requisitionId: `RACE-${mutationRunId}`,
+      });
+      const raced = await Promise.all([
+        serviceA.capture(raceCommand, `extension-race-a:${mutationRunId}`),
+        serviceA.capture(raceCommand, `extension-race-b:${mutationRunId}`),
+      ]);
+      expect(raced.map((result) => result.status).sort()).toEqual(['created', 'duplicate']);
+
       const ownerBResult = await serviceB.capture(command, `extension-owner-b:${mutationRunId}`);
       expect(ownerBResult).toMatchObject({ status: 'created', idempotentReplay: false });
       expect(ownerBResult.application.id).not.toBe(first.application.id);
@@ -1064,8 +1109,8 @@ describe.sequential('Neon Clerk RLS integration', () => {
           .from(jobDescriptionSnapshots)
           .where(eq(jobDescriptionSnapshots.applicationId, applicationRow!.id)),
       ]);
-      expect(eventCount[0]?.value).toBe(1);
-      expect(snapshotCount[0]?.value).toBe(1);
+      expect(eventCount[0]?.value).toBe(3);
+      expect(snapshotCount[0]?.value).toBe(3);
     },
     30_000,
   );

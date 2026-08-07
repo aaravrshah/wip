@@ -1,9 +1,13 @@
-import { SignInButton, useAuth } from '@clerk/chrome-extension';
+import { SignInButton, useAuth, useClerk } from '@clerk/chrome-extension';
 import { applicationStages, stageLabels, type ApplicationStage } from '@wip/domain';
-import type { ExtensionCaptureCommand, ExtensionCaptureResponse } from '@wip/schemas';
+import type {
+  ExtensionCaptureCommand,
+  ExtensionCaptureResponse,
+  ExtensionSnapshotAttachmentResponse,
+} from '@wip/schemas';
 import { useEffect, useMemo, useRef, useState } from 'react';
 
-import { saveCapture } from '../api/capture-client';
+import { attachCaptureSnapshot, CaptureApiError, saveCapture } from '../api/capture-client';
 import type { ExtensionConfig } from '../config';
 import { captureActiveTab } from '../extraction/capture-active-tab';
 import type { ExtractionDraft, ExtractionResult } from '../extraction/types';
@@ -20,6 +24,9 @@ export interface PopupServices {
   saveDraft(value: StoredCaptureDraft): Promise<void>;
   clearDraft(): Promise<void>;
   save(input: Parameters<typeof saveCapture>[0]): ReturnType<typeof saveCapture>;
+  attachSnapshot(
+    input: Parameters<typeof attachCaptureSnapshot>[0],
+  ): ReturnType<typeof attachCaptureSnapshot>;
   open(url: string): Promise<void>;
 }
 
@@ -29,6 +36,7 @@ const defaultServices: PopupServices = {
   saveDraft: saveCaptureDraft,
   clearDraft: clearCaptureDraft,
   save: saveCapture,
+  attachSnapshot: attachCaptureSnapshot,
   async open(url) {
     await chrome.tabs.create({ url });
   },
@@ -39,7 +47,13 @@ type ViewState =
   | { name: 'review' }
   | { name: 'unsupported'; reason: string; sourceUrl?: string }
   | { name: 'saving' }
-  | { name: 'saved'; result: ExtensionCaptureResponse }
+  | { name: 'duplicate'; result: Extract<ExtensionCaptureResponse, { status: 'duplicate' }> }
+  | {
+      name: 'saved';
+      result:
+        | Extract<ExtensionCaptureResponse, { status: 'created' }>
+        | ExtensionSnapshotAttachmentResponse;
+    }
   | { name: 'cancelled' };
 
 function confidenceHint(draft: ExtractionDraft, field: keyof ExtractionDraft['fieldEvidence']) {
@@ -52,6 +66,30 @@ function cleanOptional(value: string): string | undefined {
   return value.trim() || undefined;
 }
 
+function captureCommand(draft: ExtractionDraft): ExtensionCaptureCommand {
+  return {
+    company: draft.company?.trim() ?? '',
+    role: draft.role?.trim() ?? '',
+    stage: draft.stage ?? 'saved',
+    sourceUrl: draft.sourceUrl,
+    canonicalUrl: draft.canonicalUrl,
+    pageTitle: draft.pageTitle,
+    location: cleanOptional(draft.location ?? ''),
+    workplace: draft.workplace,
+    employmentType: cleanOptional(draft.employmentType ?? ''),
+    salaryText: cleanOptional(draft.salaryText ?? ''),
+    requisitionId: cleanOptional(draft.requisitionId ?? ''),
+    descriptionHtml: draft.descriptionHtml,
+    descriptionText: draft.descriptionText,
+    extraction: {
+      extractorVersion: draft.extractorVersion,
+      selectedSource: draft.selectedSource,
+      fieldEvidence: draft.fieldEvidence,
+      warnings: draft.warnings,
+    },
+  };
+}
+
 export function CapturePopup({
   config,
   services = defaultServices,
@@ -60,10 +98,14 @@ export function CapturePopup({
   services?: PopupServices;
 }) {
   const { getToken, isLoaded, isSignedIn } = useAuth();
+  const { signOut } = useClerk();
   const [view, setView] = useState<ViewState>({ name: 'loading' });
   const [draft, setDraft] = useState<ExtractionDraft>();
   const [idempotencyKey, setIdempotencyKey] = useState('');
   const [error, setError] = useState<string>();
+  const [reauthRequired, setReauthRequired] = useState(false);
+  const [reauthObservedSignedOut, setReauthObservedSignedOut] = useState(false);
+  const [isAttaching, setIsAttaching] = useState(false);
   const statusHeading = useRef<HTMLHeadingElement>(null);
 
   const initialize = async (forceExtract = false) => {
@@ -101,8 +143,22 @@ export function CapturePopup({
   }, []);
 
   useEffect(() => {
-    if (['unsupported', 'saved'].includes(view.name) || error) statusHeading.current?.focus();
+    if (['unsupported', 'duplicate', 'saved'].includes(view.name) || error)
+      statusHeading.current?.focus();
   }, [error, view]);
+
+  useEffect(() => {
+    if (!reauthRequired || !isLoaded) return;
+    if (!isSignedIn) {
+      setReauthObservedSignedOut(true);
+      return;
+    }
+    if (reauthObservedSignedOut) {
+      setReauthRequired(false);
+      setReauthObservedSignedOut(false);
+      setError(undefined);
+    }
+  }, [isLoaded, isSignedIn, reauthObservedSignedOut, reauthRequired]);
 
   const canSave = Boolean(
     draft?.company?.trim() &&
@@ -110,6 +166,7 @@ export function CapturePopup({
     draft.descriptionText.trim() &&
     isLoaded &&
     isSignedIn &&
+    !reauthRequired &&
     view.name === 'review',
   );
 
@@ -127,6 +184,28 @@ export function CapturePopup({
     await services.saveDraft({ draft: current, idempotencyKey });
   };
 
+  const tokenOrThrow = async () => {
+    const token = await getToken({ skipCache: true });
+    if (!token) {
+      throw new CaptureApiError(
+        'Your Wip session expired or was revoked. Sign in again; your reviewed job is still here.',
+        'authentication_required',
+      );
+    }
+    return token;
+  };
+
+  const handleSaveError = async (caught: unknown) => {
+    const authenticationFailed =
+      caught instanceof CaptureApiError && caught.code === 'authentication_required';
+    if (authenticationFailed) {
+      setReauthRequired(true);
+      setReauthObservedSignedOut(false);
+      await signOut().catch(() => undefined);
+    }
+    setError(caught instanceof Error ? caught.message : 'Wip could not save this job.');
+  };
+
   const submit = async () => {
     if (!draft || !isSignedIn) return;
     setError(undefined);
@@ -134,40 +213,46 @@ export function CapturePopup({
     await persistReviewedDraft(draft);
 
     try {
-      const token = await getToken({ skipCache: true });
-      if (!token) throw new Error('Sign in to Wip before saving this job.');
-      const command: ExtensionCaptureCommand = {
-        company: draft.company?.trim() ?? '',
-        role: draft.role?.trim() ?? '',
-        stage: draft.stage ?? 'saved',
-        sourceUrl: draft.sourceUrl,
-        canonicalUrl: draft.canonicalUrl,
-        pageTitle: draft.pageTitle,
-        location: cleanOptional(draft.location ?? ''),
-        workplace: draft.workplace,
-        employmentType: cleanOptional(draft.employmentType ?? ''),
-        salaryText: cleanOptional(draft.salaryText ?? ''),
-        requisitionId: cleanOptional(draft.requisitionId ?? ''),
-        descriptionHtml: draft.descriptionHtml,
-        descriptionText: draft.descriptionText,
-        extraction: {
-          extractorVersion: draft.extractorVersion,
-          selectedSource: draft.selectedSource,
-          fieldEvidence: draft.fieldEvidence,
-          warnings: draft.warnings,
-        },
-      };
+      const token = await tokenOrThrow();
       const result = await services.save({
         apiOrigin: config.apiOrigin,
-        command,
+        command: captureCommand(draft),
         idempotencyKey,
         token,
       });
+      setReauthRequired(false);
+      if (result.status === 'duplicate') {
+        setView({ name: 'duplicate', result });
+        return;
+      }
       await services.clearDraft();
       setView({ name: 'saved', result });
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Wip could not save this job.');
+      await handleSaveError(caught);
       setView({ name: 'review' });
+    }
+  };
+
+  const attachSnapshot = async () => {
+    if (!draft || view.name !== 'duplicate') return;
+    setError(undefined);
+    setIsAttaching(true);
+    await persistReviewedDraft(draft);
+    try {
+      const token = await tokenOrThrow();
+      const result = await services.attachSnapshot({
+        apiOrigin: config.apiOrigin,
+        command: { ...captureCommand(draft), applicationId: view.result.application.id },
+        idempotencyKey: idempotencyKey.replace(/^extension-capture:/, 'extension-snapshot:'),
+        token,
+      });
+      setReauthRequired(false);
+      await services.clearDraft();
+      setView({ name: 'saved', result });
+    } catch (caught) {
+      await handleSaveError(caught);
+    } finally {
+      setIsAttaching(false);
     }
   };
 
@@ -175,6 +260,8 @@ export function CapturePopup({
     await services.clearDraft();
     setDraft(undefined);
     setError(undefined);
+    setReauthRequired(false);
+    setReauthObservedSignedOut(false);
     setView({ name: 'cancelled' });
   };
 
@@ -343,12 +430,13 @@ export function CapturePopup({
             <pre>{draft.descriptionText}</pre>
           </details>
 
-          {!isLoaded || !isSignedIn ? (
+          {!isLoaded || !isSignedIn || reauthRequired ? (
             <section className="signed-out-card" aria-label="Sign in to save">
-              <h2>Sign in to save</h2>
+              <h2>{reauthRequired ? 'Sign in again' : 'Sign in to save'}</h2>
               <p>
-                Your reviewed draft stays only in this browser session. Native extension sign-in
-                does not give Wip access to employer cookies.
+                {reauthRequired
+                  ? 'Your previous session expired or was revoked. Your reviewed job remains in temporary extension storage.'
+                  : 'Your reviewed draft stays only in this browser session. Native extension sign-in does not give Wip access to employer cookies.'}
               </p>
               <SignInButton mode="modal">
                 <button className="primary-button" type="button">
@@ -385,21 +473,87 @@ export function CapturePopup({
         </form>
       )}
 
+      {view.name === 'duplicate' && (
+        <section className="center-state duplicate-state">
+          <h1 ref={statusHeading} tabIndex={-1}>
+            Already in Wip
+          </h1>
+          <p>
+            {view.result.application.role} at {view.result.application.company}
+          </p>
+          <p>
+            Wip found the same source URL or requisition ID and did not create another application.
+            You can explicitly preserve this reviewed description as a new immutable snapshot.
+          </p>
+          {error && (
+            <div className="error-card" role="alert">
+              <h2>Couldn’t attach the snapshot yet</h2>
+              <p>{error}</p>
+            </div>
+          )}
+          {!isLoaded || !isSignedIn || reauthRequired ? (
+            <section className="signed-out-card" aria-label="Sign in to attach snapshot">
+              <h2>Sign in again</h2>
+              <p>Your reviewed job will remain available while you restore your Wip session.</p>
+              <SignInButton mode="modal">
+                <button className="primary-button" type="button">
+                  Sign in securely
+                </button>
+              </SignInButton>
+            </section>
+          ) : (
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void attachSnapshot()}
+              disabled={isAttaching}
+            >
+              {isAttaching ? 'Attaching…' : 'Attach as new snapshot'}
+            </button>
+          )}
+          <button
+            className="secondary-button"
+            type="button"
+            onClick={() =>
+              void services
+                .clearDraft()
+                .then(() => services.open(`${config.apiOrigin}${view.result.application.path}`))
+            }
+            disabled={isAttaching}
+          >
+            Keep existing and open
+          </button>
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => void cancel()}
+            disabled={isAttaching}
+          >
+            Cancel and clear
+          </button>
+        </section>
+      )}
+
       {view.name === 'saved' && (
         <section className="center-state success-state">
           <span className="success-mark" aria-hidden="true">
             ✓
           </span>
           <h1 ref={statusHeading} tabIndex={-1}>
-            {view.result.status === 'duplicate' ? 'Already in Wip' : 'Saved to Wip'}
+            {view.result.status === 'snapshot_attached'
+              ? view.result.created
+                ? 'New snapshot attached'
+                : 'Snapshot already current'
+              : 'Saved to Wip'}
           </h1>
           <p>
             {view.result.application.role} at {view.result.application.company}
           </p>
-          {view.result.status === 'duplicate' && (
+          {view.result.status === 'snapshot_attached' && (
             <p>
-              Wip found the same source URL or requisition ID and did not create another
-              application.
+              {view.result.created
+                ? 'Wip preserved the reviewed description without changing the application stage.'
+                : 'The same description was already preserved, so Wip did not create a redundant copy.'}
             </p>
           )}
           <button

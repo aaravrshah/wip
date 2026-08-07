@@ -1,6 +1,6 @@
 # Wip
 
-Wip is a user-controlled job-application tracker. The repository now contains Milestone 2A: the Milestone 1C responsive tracker plus a user-invoked WXT/React Chrome Manifest V3 extension that extracts, reviews, and saves the current job through an authenticated API. Clerk provides authentication, Neon PostgreSQL is the event-first system of record, and forced database RLS isolates owners. All checked-in fixtures are deterministic and fictional.
+Wip is a user-controlled job-application tracker. The repository now contains Milestone 2B: the Milestone 1C responsive tracker plus a hardened, user-invoked WXT/React Chrome Manifest V3 extension that extracts, reviews, and saves the current job through an authenticated API. Clerk provides authentication, Neon PostgreSQL is the event-first system of record, and forced database RLS isolates owners. All checked-in fixtures are deterministic and fictional.
 
 “Wip” is a working product name and has not been legally cleared as a final name.
 
@@ -17,14 +17,15 @@ Wip is a user-controlled job-application tracker. The repository now contains Mi
 - Metadata-only resumes, cover letters, portfolios, and other documents with immutable versions and explicit application uses
 - Versioned full-tracker JSON export, spreadsheet-safe applications CSV export, and exact-phrase deletion of all tracker data while retaining the separate Clerk account
 - Stable JSON `/api/v1` read/write routes with Zod validation, request-size limits, same-origin CSRF checks, idempotency for creates/stage events, and stable error bodies
-- User-invoked current-tab extraction with JSON-LD first, semantic/ATS fallbacks, visible provenance/confidence, and no background browsing observation
+- User-invoked current-tab extraction with JSON-LD first, focused Greenhouse/Lever/Workday adapters, semantic fallbacks, visible provenance/confidence, and no background browsing observation
 - A keyboard-accessible review popup that sends nothing until Save, retains failed drafts only in `chrome.storage.session`, and clears them after success/cancel
-- Authenticated `POST /api/v1/captures` with an exact extension-origin CORS allowlist, server-side HTML sanitization/hashing, transactional application/event/snapshot creation, idempotent retry, and conservative duplicate detection
+- Authenticated capture and snapshot-attachment APIs with exact extension-origin/CORS/Clerk-party validation, server-side HTML sanitization/hashing, transactional writes, idempotent retry, conservative duplicate detection, and duplicate-race locks
+- A stable checked-in public development extension identity, complete icon set, restrictive MV3 CSP, inspected release ZIP, permission/privacy disclosures, and a private-beta store-listing draft
 - Enabled and forced PostgreSQL RLS on all 11 owner/identity tables, with narrow operation/column grants for the Milestone 1C command surface
 - An explicit fictional in-memory demo and idempotent database seed
 - Unit/UI tests plus opt-in Neon/Clerk mutation and two-user RLS integration tests
 
-Demo mode remains read-only and rejects capture or other mutation requests. Archive/restore, attaching a new snapshot to an existing duplicate, background capture, named-site support promises, Clerk-account deletion, email ingestion, Hiring Pulse, file uploads, billing, Web Store publication, and deployment are not included.
+Demo mode remains read-only and rejects capture or other mutation requests. Archive/restore, creating a second application despite a likely duplicate, background capture, broad named-site support promises, Clerk-account deletion, email ingestion, Hiring Pulse, file uploads, billing, Web Store publication, and deployment are not included.
 
 ## Requirements
 
@@ -60,8 +61,8 @@ Milestone 2A deliberately does not use Clerk Sync Host because Clerk's documente
 1. In the same Clerk development instance, open **Native applications** and enable the **Native API**. Review Clerk's warning that this public request path cannot use browser CAPTCHA in the same way as the web flow.
 2. Confirm email verification code is enabled as described above. Google and email-link methods are not available inside a standalone extension popup; users can still use them on the web app.
 3. Under **API keys → Quick Copy → Chrome Extension**, copy the public publishable key and exact Frontend API URL into the extension environment described below. Never put the Clerk secret key in `apps/extension`.
-4. After loading the unpacked build, copy its 32-character ID from `chrome://extensions`. Add `chrome-extension://<ID>` to the Clerk instance's allowed origins using Clerk's documented instance allowed-origins control. Do not place the secret key or API command in the repository.
-5. Put that same exact origin in web `WIP_EXTENSION_ORIGINS`, restart the web server, then rebuild/reload the extension if its configured hosts changed.
+4. Add the checked-in development origin `chrome-extension://cokkeghadjofigomdgpdpmfebgggmnlk` to the Clerk instance's allowed origins. This ID is derived from a public development key; no private signing key is stored or required.
+5. Put that same exact origin in web `WIP_EXTENSION_ORIGINS`. The server validates it both as the CORS origin and as the Clerk session token's authorized party (`azp`). Restart the web server, then rebuild/reload the extension if configured hosts changed.
 
 Clerk's current official references are [Chrome Extension SDK authentication options](https://clerk.com/docs/reference/chrome-extension/overview), [Native API setup](https://clerk.com/docs/guides/development/deployment/chrome-extension), and [Sync Host permissions](https://clerk.com/docs/guides/sessions/sync-host).
 
@@ -117,7 +118,7 @@ cp apps/web/.env.example apps/web/.env.local
 cp apps/extension/.env.example apps/extension/.env.local
 ```
 
-For the web app, set `WIP_DATA_SOURCE=neon`, the existing Clerk/Neon values, `WIP_WEB_ORIGIN=http://localhost:3000`, and the exact Chrome origin in `WIP_EXTENSION_ORIGINS`. For the extension, set the exact local API origin, Clerk publishable key, and Clerk Frontend API origin. Every `WXT_` value is public and may enter the extension bundle; never add a secret or database URL under that prefix.
+For the web app, set `WIP_DATA_SOURCE=neon`, the existing Clerk/Neon values, `WIP_WEB_ORIGIN=http://localhost:3000`, and `WIP_EXTENSION_ORIGINS=chrome-extension://cokkeghadjofigomdgpdpmfebgggmnlk`. For the extension, set the exact local API origin, Clerk publishable key, and Clerk Frontend API origin. Every `WXT_` value is public and may enter the extension bundle; never add a secret or database URL under that prefix.
 
 In two terminals:
 
@@ -143,6 +144,8 @@ The deterministic local job page is [http://localhost:3000/dev/fixtures/job-post
 | `WXT_WIP_API_ORIGIN`                | Extension manifest/client          | Public exact Wip API origin; no path or wildcard                       |
 | `WXT_CLERK_PUBLISHABLE_KEY`         | Extension Clerk SDK                | Public Clerk publishable key                                           |
 | `WXT_CLERK_FRONTEND_API_ORIGIN`     | Extension manifest                 | Public exact Clerk Frontend API origin needed for Clerk requests       |
+| `WXT_WIP_EXTENSION_ID`              | Optional extension build assertion | Public expected ID; defaults to the checked-in development ID          |
+| `WXT_WIP_EXTENSION_PUBLIC_KEY`      | Optional extension manifest        | Public key only; defaults to the checked-in development public key     |
 
 No database URL may use a `NEXT_PUBLIC_` prefix.
 
@@ -183,16 +186,16 @@ Use fictional data on a disposable development branch. Tracker deletion is immed
 
 1. Configure both local environment files and run `pnpm build:extension`.
 2. Open `chrome://extensions`, enable **Developer mode**, choose **Load unpacked**, and select `apps/extension/.output/chrome-mv3`.
-3. Copy the generated extension ID. Configure Clerk allowed origins and web `WIP_EXTENSION_ORIGINS=chrome-extension://<ID>`, then restart `pnpm dev:web`.
+3. Confirm Chrome shows ID `cokkeghadjofigomdgpdpmfebgggmnlk`. Configure that exact origin in Clerk allowed origins and web `WIP_EXTENSION_ORIGINS`, then restart `pnpm dev:web`.
 4. If the host or public Clerk values changed, rebuild the extension and click **Reload** on its card in `chrome://extensions`.
 5. Open `http://localhost:3000/dev/fixtures/job-posting`, click Wip in the Chrome toolbar, and confirm the loading state becomes an editable review. No request is sent yet.
 6. If signed out, use **Sign in securely** and the email verification-code flow. Review the fields, exact URL, provenance hints, and description, then choose **Save to Wip**.
 7. Confirm the success screen opens the created application and its timeline contains one confirmed extension-sourced creation event plus an immutable sanitized snapshot.
-8. Invoke Wip again on the same fixture. Confirm it reports **Already in Wip**, opens the existing record, and does not overwrite its snapshot or add another application.
+8. Invoke Wip again on the same fixture. Confirm it reports **Already in Wip**. Choose **Attach as new snapshot** and verify Wip appends one immutable snapshot and timeline event without creating another application; retrying does not duplicate either row.
 9. Test `chrome://extensions` or an unrelated page: Wip should show a safe unsupported/manual-fallback state without asking for broader access.
 10. Choose **Cancel and clear** on a new review and reopen the popup; the prior page content should be gone. Closing Chrome also clears `chrome.storage.session`.
 
-`pnpm zip:extension` creates the packaged artifact under `apps/extension/.output`. Milestone 2A does not publish it to the Chrome Web Store.
+`pnpm zip:extension` creates and inspects the packaged artifact under `apps/extension/.output`. Tests, fixtures, TypeScript, source maps, and unused source assets are excluded. See [`docs/extension-private-beta.md`](./docs/extension-private-beta.md) for permission justifications, privacy disclosures, release review, and the store-listing draft. Milestone 2B does not publish it to the Chrome Web Store.
 
 ## Repository layout
 

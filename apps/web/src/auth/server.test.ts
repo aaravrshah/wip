@@ -16,4 +16,44 @@ describe('authenticated database identity', () => {
       resolveAuthenticatedDatabaseIdentity({ isAuthenticated: true, userId: 'user_test_a' }),
     ).resolves.toEqual({ clerkUserId: 'user_test_a' });
   });
+
+  test('requires the Clerk authorized-party claim to match the invoking extension', async () => {
+    const extensionOrigin = 'chrome-extension://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+    await expect(
+      resolveAuthenticatedDatabaseIdentity(
+        {
+          isAuthenticated: true,
+          userId: 'user_test_a',
+          sessionClaims: { azp: extensionOrigin },
+        },
+        {
+          authorizedParties: ['https://wip.example', extensionOrigin],
+          requiredAuthorizedParty: extensionOrigin,
+        },
+      ),
+    ).resolves.toEqual({ clerkUserId: 'user_test_a' });
+
+    await expect(
+      resolveAuthenticatedDatabaseIdentity(
+        {
+          isAuthenticated: true,
+          userId: 'user_test_a',
+          sessionClaims: { azp: 'chrome-extension://bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb' },
+        },
+        {
+          authorizedParties: ['https://wip.example', extensionOrigin],
+          requiredAuthorizedParty: extensionOrigin,
+        },
+      ),
+    ).rejects.toThrow(/authorized Wip origin/i);
+    await expect(
+      resolveAuthenticatedDatabaseIdentity(
+        { isAuthenticated: true, userId: 'user_test_a', sessionClaims: {} },
+        {
+          authorizedParties: ['https://wip.example', extensionOrigin],
+          requiredAuthorizedParty: extensionOrigin,
+        },
+      ),
+    ).rejects.toThrow(/authorized Wip origin/i);
+  });
 });

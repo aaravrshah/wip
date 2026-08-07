@@ -69,6 +69,7 @@ describe('/api/v1/captures', () => {
   test('allows only configured extension origins and reflects no wildcard CORS header', async () => {
     const response = await POST(request());
     expect(response.status).toBe(201);
+    expect(mocks.createService).toHaveBeenCalledWith(origin);
     expect(response.headers.get('access-control-allow-origin')).toBe(origin);
     expect(response.headers.get('access-control-allow-origin')).not.toBe('*');
 

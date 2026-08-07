@@ -138,4 +138,18 @@ describe('database ownership schema', () => {
     expect(migration).not.toMatch(/ON CONFLICT \(auth_subject\)/);
     expect(migration).toMatch(/auth_provider = 'clerk'[\s\S]*auth_subject = clerk_subject/);
   });
+
+  test('keeps the post-runtime Drizzle metadata synchronization migration DDL-free', () => {
+    const migration = readFileSync(
+      resolve(import.meta.dirname, '../drizzle/0009_previous_bill_hollister.sql'),
+      'utf8',
+    );
+    const executableSql = migration
+      .split('\n')
+      .filter((line) => !line.trimStart().startsWith('--'))
+      .join('\n')
+      .trim();
+
+    expect(executableSql).toBe('select 1;');
+  });
 });

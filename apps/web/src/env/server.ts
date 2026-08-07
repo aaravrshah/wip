@@ -2,6 +2,8 @@ import 'server-only';
 
 import { z } from 'zod';
 
+import { configuredAuthorizedParties, parseExtensionOrigins } from '@/auth/authorized-parties';
+
 const baseEnvironmentSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   WIP_DATA_SOURCE: z.enum(['demo', 'neon']).optional(),
@@ -28,18 +30,17 @@ export type ServerEnvironment =
 
 let cachedEnvironment: ServerEnvironment | undefined;
 
-const extensionOriginSchema = z
-  .string()
-  .trim()
-  .regex(/^chrome-extension:\/\/[a-p]{32}$/);
-
-export function parseExtensionOrigins(value: string | undefined): readonly string[] {
-  if (!value?.trim()) return [];
-  return [...new Set(value.split(',').map((origin) => extensionOriginSchema.parse(origin)))];
-}
+export { parseExtensionOrigins };
 
 export function getExtensionOrigins(): readonly string[] {
   return parseExtensionOrigins(process.env.WIP_EXTENSION_ORIGINS);
+}
+
+export function getAuthorizedParties(): readonly string[] {
+  return configuredAuthorizedParties({
+    webOrigin: process.env.WIP_WEB_ORIGIN,
+    extensionOrigins: process.env.WIP_EXTENSION_ORIGINS,
+  });
 }
 
 export function parseServerEnvironment(

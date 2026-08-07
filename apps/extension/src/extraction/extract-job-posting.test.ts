@@ -35,6 +35,8 @@ describe('job-posting extraction', () => {
   test.each([
     ['semantic', 'semantic', 'Fictional Lumen Works'],
     ['greenhouse', 'ats_adapter', 'Fictional Greenhouse Studio'],
+    ['lever', 'ats_adapter', 'Fictional Northstar Lab'],
+    ['workday', 'ats_adapter', 'Fictional Harbor Research'],
   ])('extracts a focused %s page without live scraping', (name, source, company) => {
     const result = extractJobPostingInPage({
       html: fixture(name),
@@ -44,6 +46,51 @@ describe('job-posting extraction', () => {
     if (result.status !== 'captured') return;
     expect(result.draft.selectedSource).toBe(source);
     expect(result.draft.company).toBe(company);
+  });
+
+  test.each([
+    [
+      'greenhouse',
+      {
+        role: 'Product Support Associate',
+        location: 'Hybrid — Cedar Falls, IA',
+        workplace: 'hybrid',
+        employmentType: 'Full-time',
+        requisitionId: 'GREEN-27',
+      },
+    ],
+    [
+      'lever',
+      {
+        role: 'Community Operations Coordinator',
+        location: 'Remote — United States',
+        workplace: 'remote',
+        employmentType: 'Full-time',
+        requisitionId: 'LEV-208',
+      },
+    ],
+    [
+      'workday',
+      {
+        role: 'Associate Data Steward',
+        location: 'Boston, MA',
+        workplace: 'hybrid',
+        employmentType: 'Full time',
+        requisitionId: 'R-1042',
+      },
+    ],
+  ])('extracts reviewed %s ATS fields from fictional fixtures', (name, expected) => {
+    const result = extractJobPostingInPage({
+      html: fixture(name),
+      url: `https://jobs.example.invalid/${name}`,
+    });
+    expect(result.status).toBe('captured');
+    if (result.status !== 'captured') return;
+    expect(result.draft).toMatchObject({
+      ...expected,
+      selectedSource: 'ats_adapter',
+      fieldEvidence: { description: { source: 'ats_adapter', confidence: 'high' } },
+    });
   });
 
   test('ignores malformed structured data and explains the fallback', () => {

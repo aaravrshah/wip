@@ -308,21 +308,19 @@ Let a signed-in user intentionally capture the current job page into the tracker
 
 Use observed 2A failures to harden capture and duplicate workflows without broadening background access.
 
-### Recommended scope
+### Implemented scope
 
-- Configure and test a stable development/production CRX ID and documented Clerk allowed origins.
-- Decide the production extension-auth experience after reviewing Native API abuse/session storage and the `cookies` tradeoff for Sync Host; do not add a permission silently.
-- Add an explicit user-confirmed action to append a new immutable snapshot to an existing duplicate, plus a deliberate create-anyway escape hatch where safe.
-- Add snapshot history/version selection on Application Detail before supporting attachment.
-- Add only a small number of isolated ATS adapters selected from real opt-in failure reports, backed by sanitized fictional regression fixtures.
-- Perform controlled browser QA across accessible static/dynamic pages, CSP-heavy pages, iframed job views, and expired/revoked sessions.
-- Reduce or deliberately accept the Clerk popup bundle size, finish stable icons/store metadata, and prepare—but do not publish—a store-review artifact.
+- Stabilize the unpacked development CRX ID with a checked-in public manifest key, without keeping private signing material; validate the exact origin as CORS origin and Clerk authorized party.
+- Preserve the reviewed session draft across expired/revoked-session failures and require a fresh sign-in before retry.
+- Serialize owner-scoped URL and requisition/company duplicate keys, then add an explicit user-confirmed action to append a new immutable snapshot and timeline event to an existing duplicate.
+- Add isolated Greenhouse, Lever, and Workday adapters backed only by sanitized fictional regression fixtures and generic fallback.
+- Finish stable icons, strict extension-page CSP, clean production bundles, inspected release ZIP generation, permission/privacy disclosures, and a draft store listing without publishing it.
 
 ### Acceptance criteria
 
 1. Stable IDs keep Clerk and Wip origin allowlists deterministic across rebuilds.
 2. Snapshot attachment is an explicit confirmed append and never rewrites an earlier snapshot or timeline.
-3. Create-anyway cannot be triggered by a network retry and remains idempotent.
+3. Attachment retries are idempotent, duplicate capture races converge on one application, and there is no create-anyway path in this milestone.
 4. Every added adapter has fictional regression fixtures, bounded DOM scope, provenance, and a generic fallback.
 5. Authentication expiry/revocation, CORS denial, duplicate races, and dynamic-page failures recover without data loss or broader permissions.
 6. Store-readiness review confirms packaged-code-only MV3 behavior, narrow disclosure, accessibility, bundle size, and no secrets; publication remains separately authorized.
@@ -330,6 +328,8 @@ Use observed 2A failures to harden capture and duplicate workflows without broad
 ### Deliberately postponed
 
 - Background monitoring, search-result harvesting, confirmation-page detection, broad host access, auto-apply/form filling, and employer credentials/cookies.
+- A create-anyway duplicate override, a full snapshot-history selector, and a general web recapture UI.
+- Production/Web Store signing identity, submission/publication, deployment, and broad live-site compatibility claims.
 - Email ingestion, Hiring Pulse, file uploads, external reminders, billing, and native/mobile clients.
 
 ## Milestone 3 — Forwarded-email ingestion with confirmation

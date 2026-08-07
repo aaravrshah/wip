@@ -1,9 +1,9 @@
 import type { ExtractionDraft, ExtractionResult, FieldEvidence } from './types';
 
-export const EXTRACTOR_VERSION = 'wip-extractor/1.0.0';
+export const EXTRACTOR_VERSION = 'wip-extractor/1.1.0';
 
 export function extractJobPostingInPage(input?: { html: string; url: string }): ExtractionResult {
-  const extractorVersion = 'wip-extractor/1.0.0';
+  const extractorVersion = EXTRACTOR_VERSION;
   const activeDocument = input
     ? new DOMParser().parseFromString(input.html, 'text/html')
     : document;
@@ -150,13 +150,92 @@ export function extractJobPostingInPage(input?: { html: string; url: string }): 
     }
   }
 
-  const atsRoot = activeDocument.querySelector<HTMLElement>(
-    '[data-wip-ats-job], .job__description, #content .job-description',
-  );
-  if (!descriptionContainer && atsRoot) {
-    descriptionContainer = atsRoot;
-    selectedSource = 'ats_adapter';
-    setEvidence('description', 'ats_adapter', 'high');
+  const atsAdapters = [
+    {
+      name: 'Greenhouse',
+      detect: '.job__description, #app_body, #content .job-description',
+      description: '[data-wip-ats-job], .job__description, #app_body .job-description',
+      role: '[data-job-title], .app-title, #header .app-title',
+      company: '[data-company], .company-name, #header .company-name',
+      location: '[data-job-location], .job-location, #content .location, #header .location',
+      workplace: '[data-workplace], .workplace',
+      employmentType: '[data-employment-type], .employment-type',
+      requisitionId: '[data-requisition-id], [data-job-id]',
+    },
+    {
+      name: 'Lever',
+      detect: '.posting-page, .posting-headline, .posting-description',
+      description: '.posting-description, .posting-page .section-wrapper.page-full-width',
+      role: '.posting-headline h2, [data-qa="posting-name"]',
+      company: '[data-qa="company-name"], .main-header-logo img[alt]',
+      location: '.posting-categories .location, [data-qa="posting-location"]',
+      workplace: '.posting-categories .workplaceTypes, [data-qa="workplace-type"]',
+      employmentType: '.posting-categories .commitment, [data-qa="posting-commitment"]',
+      requisitionId: '[data-qa="posting-id"], [data-requisition-id]',
+    },
+    {
+      name: 'Workday',
+      detect:
+        '[data-automation-id="jobPostingDescription"], [data-automation-id="jobPostingHeader"]',
+      description: '[data-automation-id="jobPostingDescription"]',
+      role: '[data-automation-id="jobPostingHeader"] h2, [data-automation-id="jobPostingHeader"]',
+      company: '[data-automation-id="jobPostingCompany"]',
+      location: '[data-automation-id="locations"]',
+      workplace: '[data-automation-id="remoteType"]',
+      employmentType: '[data-automation-id="time"]',
+      requisitionId: '[data-automation-id="jobReqId"]',
+    },
+  ] as const;
+  const atsAdapter = atsAdapters.find((adapter) => activeDocument.querySelector(adapter.detect));
+  const atsRoot = atsAdapter
+    ? activeDocument.querySelector<HTMLElement>(atsAdapter.description)
+    : undefined;
+  if (atsAdapter) {
+    if (!descriptionContainer && atsRoot) {
+      descriptionContainer = atsRoot;
+      selectedSource = 'ats_adapter';
+      setEvidence('description', 'ats_adapter', 'high');
+    }
+    if (!role) {
+      role = selectText(atsAdapter.role);
+      if (role) setEvidence('role', 'ats_adapter', 'high');
+    }
+    if (!company) {
+      const companyElement = activeDocument.querySelector<HTMLElement>(atsAdapter.company);
+      company = firstText(
+        companyElement?.textContent,
+        companyElement?.getAttribute('alt'),
+        meta('meta[property="og:site_name"]'),
+      );
+      if (company) setEvidence('company', 'ats_adapter', 'medium');
+    }
+    if (!location) {
+      location = selectText(atsAdapter.location);
+      if (location) setEvidence('location', 'ats_adapter', 'high');
+    }
+    if (!employmentType) {
+      employmentType = selectText(atsAdapter.employmentType);
+      if (employmentType) setEvidence('employmentType', 'ats_adapter', 'medium');
+    }
+    if (!requisitionId) {
+      requisitionId = firstText(selectText(atsAdapter.requisitionId), meta('meta[name="job-id"]'));
+      if (requisitionId) setEvidence('requisitionId', 'ats_adapter', 'medium');
+    }
+    if (workplace === 'unspecified') {
+      const workplaceText = firstText(selectText(atsAdapter.workplace), location)?.toLowerCase();
+      if (workplaceText?.includes('remote')) {
+        workplace = 'remote';
+        setEvidence('workplace', 'ats_adapter', 'medium');
+      } else if (workplaceText?.includes('hybrid')) {
+        workplace = 'hybrid';
+        setEvidence('workplace', 'ats_adapter', 'medium');
+      } else if (workplaceText?.includes('on-site') || workplaceText?.includes('onsite')) {
+        workplace = 'on_site';
+        setEvidence('workplace', 'ats_adapter', 'medium');
+      }
+    }
+    if (!atsRoot)
+      warnings.push(`${atsAdapter.name} job metadata was found without a focused description.`);
   }
 
   const semanticRoot = activeDocument.querySelector<HTMLElement>(

@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, test, vi } from 'vitest';
 
+import { CaptureApiError } from '../api/capture-client';
 import type { ExtensionConfig } from '../config';
 import type { ExtractionDraft } from '../extraction/types';
 import { CapturePopup, type PopupServices } from './capture-popup';
@@ -10,16 +11,19 @@ const clerk = vi.hoisted(() => ({
   getToken: vi.fn(),
   isLoaded: true,
   isSignedIn: true,
+  signOut: vi.fn(),
 }));
 
 vi.mock('@clerk/chrome-extension', () => ({
   useAuth: () => clerk,
+  useClerk: () => ({ signOut: clerk.signOut }),
   SignInButton: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 const config: ExtensionConfig = {
   apiOrigin: 'http://localhost:3000',
   clerkPublishableKey: 'pk_test_fictional',
+  expectedExtensionId: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   webSignInUrl: 'http://localhost:3000/sign-in',
 };
 
@@ -65,6 +69,23 @@ function createServices(overrides: Partial<PopupServices> = {}) {
       },
       idempotentReplay: false,
     }),
+    attachSnapshot: vi.fn().mockResolvedValue({
+      status: 'snapshot_attached',
+      application: {
+        id: 'fictional-application',
+        company: draft.company,
+        role: draft.role,
+        stage: 'saved',
+        path: '/applications/fictional-application',
+      },
+      snapshot: {
+        id: '00000000-0000-4000-8000-000000000123',
+        contentSha256: 'a'.repeat(64),
+        capturedAt: '2026-08-06T12:00:00.000Z',
+      },
+      created: true,
+      idempotentReplay: false,
+    }),
     open: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   } satisfies PopupServices;
@@ -76,6 +97,7 @@ describe('CapturePopup', () => {
     clerk.isLoaded = true;
     clerk.isSignedIn = true;
     clerk.getToken.mockResolvedValue('fictional-session-token');
+    clerk.signOut.mockResolvedValue(undefined);
   });
 
   test('extracts only after invocation and presents an editable review before saving', async () => {
@@ -128,7 +150,36 @@ describe('CapturePopup', () => {
     );
   });
 
-  test('shows the existing application for a duplicate and clears temporary storage', async () => {
+  test('treats a revoked session as recoverable and preserves the reviewed draft', async () => {
+    const user = userEvent.setup();
+    const services = createServices({
+      save: vi
+        .fn()
+        .mockRejectedValue(
+          new CaptureApiError(
+            'Your Wip session expired or was revoked. Sign in again; your reviewed job is still here.',
+            'authentication_required',
+          ),
+        ),
+    });
+    const rendered = render(<CapturePopup config={config} services={services} />);
+
+    await user.click(await screen.findByRole('button', { name: 'Save to Wip' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('session expired or was revoked');
+    expect(screen.getByRole('heading', { name: 'Sign in again' })).toBeInTheDocument();
+    expect(clerk.signOut).toHaveBeenCalledOnce();
+    expect(services.clearDraft).not.toHaveBeenCalled();
+
+    clerk.isSignedIn = false;
+    rendered.rerender(<CapturePopup config={config} services={services} />);
+    clerk.isSignedIn = true;
+    rendered.rerender(<CapturePopup config={config} services={services} />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save to Wip' })).toBeEnabled());
+    expect(screen.queryByRole('heading', { name: 'Sign in again' })).not.toBeInTheDocument();
+  });
+
+  test('offers an explicit immutable snapshot attachment for a duplicate', async () => {
     const user = userEvent.setup();
     const services = createServices({
       save: vi.fn().mockResolvedValue({
@@ -147,8 +198,18 @@ describe('CapturePopup', () => {
 
     await user.click(await screen.findByRole('button', { name: 'Save to Wip' }));
     expect(await screen.findByRole('heading', { name: 'Already in Wip' })).toBeInTheDocument();
+    expect(services.clearDraft).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: 'Attach as new snapshot' }));
+    expect(
+      await screen.findByRole('heading', { name: 'New snapshot attached' }),
+    ).toBeInTheDocument();
+    expect(services.attachSnapshot).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: expect.objectContaining({ applicationId: 'existing-fictional-application' }),
+        idempotencyKey: expect.stringMatching(/^extension-snapshot:/),
+      }),
+    );
     expect(services.clearDraft).toHaveBeenCalledOnce();
-    expect(screen.getByRole('button', { name: 'Open application' })).toBeInTheDocument();
   });
 
   test('clears temporary content on explicit cancellation', async () => {

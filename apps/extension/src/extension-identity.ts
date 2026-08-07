@@ -1,0 +1,6 @@
+// Public development identity only. The one-time private key was discarded and is not required
+// to load unpacked builds. A future Chrome Web Store item will provide its own public key/ID.
+export const DEVELOPMENT_EXTENSION_PUBLIC_KEY =
+  'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAgqZ7HvsX5loRfl0m6+iXCam3rVzAmnr3ksJa4FXO+vDCISH6MUkxJ6EdWCF6utWUazfABbL4ajA95zRAWgnbhKs64KX+EOPSeCJzNqRGTi00lU1h/MG6fUcMBm/ihDfVPmo6XQ4irsqM6Q+j7UwzuXtvINP9xaPmkWKFdeHRJSqPi4Mtrzxd5yh19vGi7I2QPPo9m40vl9xAK38yMSrW8Cw0HgSyJE9e61h2lLmwq/bExWPolomAZcrB4bgPoS5m9P+qMxHYRuDLLqdtKFx4rLwxq3F/l7JaQCstXy7Si9nPsCZlm99qHjXaRHdkenTjh4St8Ymmt1M10qu6mxr8mwIDAQAB';
+
+export const DEVELOPMENT_EXTENSION_ID = 'cokkeghadjofigomdgpdpmfebgggmnlk';

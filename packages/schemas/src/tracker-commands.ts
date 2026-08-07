@@ -273,6 +273,15 @@ export const extensionCaptureCommandSchema = z
   })
   .strict();
 
+export const extensionSnapshotAttachmentCommandSchema = extensionCaptureCommandSchema.extend({
+  applicationId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(200)
+    .regex(/^[A-Za-z0-9_-]+$/, 'Use a valid application identifier.'),
+});
+
 const captureApplicationSummarySchema = z
   .object({
     id: z.string().min(1).max(200),
@@ -300,6 +309,22 @@ export const extensionCaptureResponseSchema = z.discriminatedUnion('status', [
     .strict(),
 ]);
 
+export const extensionSnapshotAttachmentResponseSchema = z
+  .object({
+    status: z.literal('snapshot_attached'),
+    application: captureApplicationSummarySchema,
+    snapshot: z
+      .object({
+        id: z.uuid(),
+        contentSha256: contentSha256Schema,
+        capturedAt: isoDateTime,
+      })
+      .strict(),
+    created: z.boolean(),
+    idempotentReplay: z.boolean(),
+  })
+  .strict();
+
 export type CreateApplicationCommand = z.infer<typeof createApplicationCommandSchema>;
 export type UpdateApplicationCommand = z.infer<typeof updateApplicationCommandSchema>;
 export type RecordStageChangeCommand = z.infer<typeof recordStageChangeCommandSchema>;
@@ -320,3 +345,9 @@ export type CaptureFieldSource = z.infer<typeof captureFieldSourceSchema>;
 export type CaptureConfidence = z.infer<typeof captureConfidenceSchema>;
 export type ExtensionCaptureCommand = z.infer<typeof extensionCaptureCommandSchema>;
 export type ExtensionCaptureResponse = z.infer<typeof extensionCaptureResponseSchema>;
+export type ExtensionSnapshotAttachmentCommand = z.infer<
+  typeof extensionSnapshotAttachmentCommandSchema
+>;
+export type ExtensionSnapshotAttachmentResponse = z.infer<
+  typeof extensionSnapshotAttachmentResponseSchema
+>;

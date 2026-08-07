@@ -8,6 +8,8 @@ import {
   deleteTrackerDataCommandSchema,
   extensionCaptureCommandSchema,
   extensionCaptureResponseSchema,
+  extensionSnapshotAttachmentCommandSchema,
+  extensionSnapshotAttachmentResponseSchema,
   idempotencyKeySchema,
   TRACKER_DELETION_PHRASE,
 } from './tracker-commands';
@@ -152,5 +154,50 @@ describe('tracker command schemas', () => {
         matchedOn: ['source_url'],
       }).status,
     ).toBe('duplicate');
+  });
+
+  test('requires an explicit application target for immutable snapshot attachment', () => {
+    const command = extensionSnapshotAttachmentCommandSchema.parse({
+      applicationId: 'fictional-application',
+      company: 'Fictional Orbit Works',
+      role: 'Junior Systems Analyst',
+      sourceUrl: 'https://jobs.example.invalid/roles/123',
+      descriptionHtml: '<p>Updated fictional description.</p>',
+      descriptionText: 'Updated fictional description.',
+      extraction: {
+        extractorVersion: 'wip-extractor/1.1.0',
+        selectedSource: 'ats_adapter',
+        fieldEvidence: {
+          description: { source: 'ats_adapter', confidence: 'high' },
+        },
+        warnings: [],
+      },
+    });
+    expect(command.applicationId).toBe('fictional-application');
+    expect(() =>
+      extensionSnapshotAttachmentCommandSchema.parse({
+        ...command,
+        applicationId: '../another-owner',
+      }),
+    ).toThrow();
+    expect(
+      extensionSnapshotAttachmentResponseSchema.parse({
+        status: 'snapshot_attached',
+        application: {
+          id: 'fictional-application',
+          company: command.company,
+          role: command.role,
+          stage: 'saved',
+          path: '/applications/fictional-application',
+        },
+        snapshot: {
+          id: crypto.randomUUID(),
+          contentSha256: 'a'.repeat(64),
+          capturedAt: '2026-08-06T12:00:00.000Z',
+        },
+        created: true,
+        idempotentReplay: false,
+      }).status,
+    ).toBe('snapshot_attached');
   });
 });

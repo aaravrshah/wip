@@ -31,13 +31,15 @@ type AuthenticatedOperation = <T>(
   operation: (database: WipDatabase, ownerId: string) => Promise<T>,
 ) => Promise<T>;
 
-async function createAuthenticatedOperation(): Promise<AuthenticatedOperation> {
+async function createAuthenticatedOperation(
+  requiredAuthorizedParty?: string,
+): Promise<AuthenticatedOperation> {
   const environment = getServerEnvironment();
   if (environment.dataSource !== 'neon') {
     throw new Error('Authenticated command context is unavailable in demo mode.');
   }
 
-  const identity = await requireApiDatabaseIdentity();
+  const identity = await requireApiDatabaseIdentity(requiredAuthorizedParty);
   return (operation) =>
     withTenantDatabase(environment.runtimeDatabaseUrl, identity.clerkUserId, async (database) => {
       const ownerId = await provisionAuthenticatedOwner(database);
@@ -185,15 +187,21 @@ export async function createTrackerDataServiceForRequest(): Promise<TrackerDataS
   };
 }
 
-export async function createExtensionCaptureServiceForRequest(): Promise<ExtensionCaptureService> {
+export async function createExtensionCaptureServiceForRequest(
+  requiredAuthorizedParty?: string,
+): Promise<ExtensionCaptureService> {
   const environment = getServerEnvironment();
   if (environment.dataSource === 'demo') return new DemoReadOnlyExtensionCaptureService();
 
-  const run = await createAuthenticatedOperation();
+  const run = await createAuthenticatedOperation(requiredAuthorizedParty);
   return {
     capture: (command, idempotencyKey) =>
       run((database, ownerId) =>
         new NeonExtensionCaptureService(database, ownerId).capture(command, idempotencyKey),
+      ),
+    attachSnapshot: (command, idempotencyKey) =>
+      run((database, ownerId) =>
+        new NeonExtensionCaptureService(database, ownerId).attachSnapshot(command, idempotencyKey),
       ),
   };
 }
